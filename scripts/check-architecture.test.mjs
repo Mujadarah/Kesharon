@@ -90,3 +90,40 @@ tauri = "2"
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /kesharon-application.*tauri/i);
 });
+
+test("rejects dependency-specific TOML tables in the domain", async () => {
+  const root = await createWorkspace({
+    "crates/kesharon-domain/Cargo.toml": `
+[package]
+name = "kesharon-domain"
+version = "0.0.0"
+
+[dependencies.rusqlite]
+version = "0.37"
+`
+  });
+
+  const result = runChecker(root);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /kesharon-domain.*rusqlite/i);
+});
+
+test("rejects dotted dependency keys in the application layer", async () => {
+  const root = await createWorkspace({
+    "crates/kesharon-application/Cargo.toml": `
+[package]
+name = "kesharon-application"
+version = "0.0.0"
+
+[dependencies]
+kesharon-domain = { path = "../kesharon-domain" }
+tauri.workspace = true
+`
+  });
+
+  const result = runChecker(root);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /kesharon-application.*tauri/i);
+});

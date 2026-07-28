@@ -1,5 +1,6 @@
 use kesharon_desktop_host::{
-    ExitDecision, LaunchConfiguration, LifecycleAction, RestartBudget, lifecycle_action,
+    ExitDecision, LaunchConfiguration, LifecycleAction, ProcessObservation, RestartBudget,
+    lifecycle_action, should_replace_daemon,
 };
 use kesharon_protocol::LaunchToken;
 
@@ -34,4 +35,11 @@ fn an_unexpected_daemon_exit_restarts_only_once() {
 fn closing_the_window_keeps_the_agent_alive_until_explicit_quit() {
     assert_eq!(lifecycle_action(false), LifecycleAction::HideToTray);
     assert_eq!(lifecycle_action(true), LifecycleAction::Exit);
+}
+
+#[test]
+fn stream_reader_errors_do_not_replace_a_potentially_live_daemon() {
+    assert!(!should_replace_daemon(ProcessObservation::StreamError));
+    assert!(!should_replace_daemon(ProcessObservation::Output));
+    assert!(should_replace_daemon(ProcessObservation::Terminated));
 }

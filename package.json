@@ -12,6 +12,7 @@
     "check:architecture": "node scripts/check-architecture.mjs",
     "lint": "pnpm -r --if-present lint",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "prepare:sidecar:release": "node scripts/prepare-sidecar.mjs --release",
     "test": "pnpm test:architecture && pnpm test:tooling && pnpm -r --if-present test",
     "test:architecture": "node --test scripts/check-architecture.test.mjs",
     "test:tooling": "node --test scripts/prepare-sidecar.test.mjs"

@@ -19,18 +19,23 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 pnpm check
+pnpm prepare:sidecar:release
 pnpm --filter @kesharon/desktop tauri build --no-bundle
 ```
 
 Observed results:
 
-- 30 Rust tests passed.
-- 11 architecture, tooling, protocol, and React tests passed.
+- 34 Rust tests passed.
+- 15 architecture, tooling, protocol, and React tests passed.
 - TypeScript checks and both production frontend builds passed.
 - Architecture boundaries passed across five checked crate manifests.
-- Tauri produced `target/release/kesharon.exe` at 11,332,608 bytes.
-- Tauri staged `target/release/kesharon-daemon.exe` at 790,016 bytes.
-- A packaged-runtime process probe observed one live host and exactly one
+- Tauri produced `target/release/kesharon.exe` at 11,327,488 bytes.
+- The isolated release sidecar build produced a 345,600-byte daemon. Its
+  SHA-256 matched the binary staged for Tauri:
+  `3E545A14FD675EA05E0AF1DED0C075CE998829C389C43EB29F97AF8F1A09EDE4`.
+- The Tauri runtime copy matched the same release-sidecar SHA-256.
+- A locally built release-executable probe observed one live host and exactly
+  one
   daemon child after startup.
 - Playwright inspected the real React shell at 1440×900 and 760×760.
 

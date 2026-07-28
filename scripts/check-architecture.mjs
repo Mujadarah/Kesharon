@@ -39,6 +39,12 @@ function normalDependencies(manifest) {
 
     if (section) {
       const name = section[1];
+      const dependencyTable = name.match(
+        /^(?:target\..+\.)?(?:build-)?dependencies\.([A-Za-z0-9_-]+)$/
+      );
+      if (dependencyTable) {
+        dependencies.add(dependencyTable[1]);
+      }
       dependencySection =
         name === "dependencies" ||
         name === "build-dependencies" ||
@@ -51,7 +57,9 @@ function normalDependencies(manifest) {
       continue;
     }
 
-    const dependency = line.match(/^([A-Za-z0-9_-]+)\s*=/);
+    const dependency = line.match(
+      /^([A-Za-z0-9_-]+)(?:\.[A-Za-z0-9_-]+)*\s*=/
+    );
     if (dependency) {
       dependencies.add(dependency[1]);
     }

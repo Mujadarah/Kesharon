@@ -23,6 +23,33 @@ export function sidecarDestination(root, hostTriple, platform = process.platform
   );
 }
 
+export function cargoBuildArguments(profile, root = ".") {
+  if (profile !== "debug" && profile !== "release") {
+    throw new Error(`unknown sidecar build profile: ${profile}`);
+  }
+  const arguments_ = ["build", "-p", "kesharon-daemon"];
+  if (profile === "release") {
+    arguments_.push("--release");
+  }
+  arguments_.push(
+    "--target-dir",
+    path.join(root, "target", `sidecar-${profile}`)
+  );
+  return arguments_;
+}
+
+export function sidecarSource(root, profile, platform = process.platform) {
+  cargoBuildArguments(profile, root);
+  const suffix = platform === "win32" ? ".exe" : "";
+  return path.join(
+    root,
+    "target",
+    `sidecar-${profile}`,
+    profile,
+    `kesharon-daemon${suffix}`
+  );
+}
+
 function run(command, args, root) {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -35,19 +62,13 @@ function run(command, args, root) {
   return result.stdout;
 }
 
-export function prepareSidecar(root) {
+export function prepareSidecar(root, profile = "debug") {
   const cargo = process.env.CARGO ?? "cargo";
   const rustc = process.env.RUSTC ?? "rustc";
   const hostTriple = parseHostTriple(run(rustc, ["-vV"], root));
-  run(cargo, ["build", "-p", "kesharon-daemon"], root);
+  run(cargo, cargoBuildArguments(profile, root), root);
 
-  const executableSuffix = process.platform === "win32" ? ".exe" : "";
-  const source = path.join(
-    root,
-    "target",
-    "debug",
-    `kesharon-daemon${executableSuffix}`
-  );
+  const source = sidecarSource(root, profile);
   const destination = sidecarDestination(root, hostTriple);
   mkdirSync(path.dirname(destination), { recursive: true });
   copyFileSync(source, destination);
@@ -60,6 +81,7 @@ if (
   pathToFileURL(path.resolve(process.argv[1])).href === pathToFileURL(currentFile).href
 ) {
   const repositoryRoot = path.resolve(path.dirname(currentFile), "..");
-  const destination = prepareSidecar(repositoryRoot);
+  const profile = process.argv.includes("--release") ? "release" : "debug";
+  const destination = prepareSidecar(repositoryRoot, profile);
   process.stdout.write(`${destination}\n`);
 }

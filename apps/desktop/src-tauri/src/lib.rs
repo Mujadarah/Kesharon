@@ -3,12 +3,13 @@
 use std::error::Error;
 use std::fmt::Write as _;
 use std::fmt::{Display, Formatter};
-use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Mutex, RwLock};
 use std::time::Duration;
 
-use kesharon_ipc::{LocalEndpoint, connect};
+use kesharon_ipc::{
+    LocalEndpoint, connect_with_timeout, read_exact_with_timeout, write_all_with_timeout,
+};
 use kesharon_protocol::{
     ClientRequest, HealthStatus, LaunchToken, MAX_FRAME_BYTES, ProtocolError, RequestMethod,
     ResponsePayload, ServerResponse, decode_server_response_frame, encode_frame,
@@ -23,6 +24,7 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 pub struct DaemonClient {
     endpoint: LocalEndpoint,
     launch_token: String,
+    io_timeout: Duration,
 }
 
 pub struct LaunchConfiguration {
@@ -105,6 +107,17 @@ pub enum LifecycleAction {
     Exit,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessObservation {
+    Output,
+    StreamError,
+    Terminated,
+}
+
+pub const fn should_replace_daemon(observation: ProcessObservation) -> bool {
+    matches!(observation, ProcessObservation::Terminated)
+}
+
 pub const fn lifecycle_action(explicit_quit: bool) -> LifecycleAction {
     if explicit_quit {
         LifecycleAction::Exit
@@ -115,10 +128,22 @@ pub const fn lifecycle_action(explicit_quit: bool) -> LifecycleAction {
 
 impl DaemonClient {
     pub fn new(endpoint: LocalEndpoint, launch_token: String) -> Result<Self, HostError> {
+        Self::new_with_timeout(endpoint, launch_token, Duration::from_secs(2))
+    }
+
+    pub fn new_with_timeout(
+        endpoint: LocalEndpoint,
+        launch_token: String,
+        io_timeout: Duration,
+    ) -> Result<Self, HostError> {
         LaunchToken::parse_hex(&launch_token)?;
+        if io_timeout.is_zero() {
+            return Err(HostError::InvalidTimeout);
+        }
         Ok(Self {
             endpoint,
             launch_token,
+            io_timeout,
         })
     }
 
@@ -143,13 +168,12 @@ impl DaemonClient {
             None,
         )?;
         let frame = encode_frame(&request)?;
-        let mut stream = connect(&self.endpoint)?;
-        stream.write_all(self.launch_token.as_bytes())?;
-        stream.write_all(&frame)?;
-        stream.flush()?;
+        let stream = connect_with_timeout(&self.endpoint, self.io_timeout)?;
+        write_all_with_timeout(&stream, self.launch_token.as_bytes(), self.io_timeout)?;
+        write_all_with_timeout(&stream, &frame, self.io_timeout)?;
 
         let mut length_prefix = [0_u8; 4];
-        stream.read_exact(&mut length_prefix)?;
+        read_exact_with_timeout(&stream, &mut length_prefix, self.io_timeout)?;
         let declared = u32::from_be_bytes(length_prefix) as usize;
         if declared > MAX_FRAME_BYTES {
             return Err(HostError::Protocol(ProtocolError::FrameTooLarge {
@@ -161,7 +185,7 @@ impl DaemonClient {
         let mut response_frame = Vec::with_capacity(declared + 4);
         response_frame.extend_from_slice(&length_prefix);
         response_frame.resize(declared + 4, 0);
-        stream.read_exact(&mut response_frame[4..])?;
+        read_exact_with_timeout(&stream, &mut response_frame[4..], self.io_timeout)?;
         Ok(decode_server_response_frame(&response_frame)?)
     }
 }
@@ -180,6 +204,7 @@ pub enum HostError {
     Random(String),
     Runtime(String),
     StateUnavailable,
+    InvalidTimeout,
     UnexpectedResponse,
 }
 
@@ -192,6 +217,7 @@ impl Display for HostError {
             Self::Random(error) => write!(formatter, "secure random generation failed: {error}"),
             Self::Runtime(error) => write!(formatter, "desktop runtime failed: {error}"),
             Self::StateUnavailable => formatter.write_str("daemon state is unavailable"),
+            Self::InvalidTimeout => formatter.write_str("daemon I/O timeout must be positive"),
             Self::UnexpectedResponse => {
                 formatter.write_str("daemon returned an unexpected response")
             }
@@ -250,9 +276,10 @@ fn start_daemon(app: &AppHandle, state: &DaemonState) -> Result<(), HostError> {
         .args(["--endpoint", &endpoint_argument])
         .spawn()
         .map_err(|error| HostError::Runtime(error.to_string()))?;
-    child
-        .write(stdin_token.as_bytes())
-        .map_err(|error| HostError::Runtime(error.to_string()))?;
+    if let Err(error) = child.write(stdin_token.as_bytes()) {
+        let _ = child.kill();
+        return Err(HostError::Runtime(error.to_string()));
+    }
 
     *state
         .client
@@ -266,7 +293,12 @@ fn start_daemon(app: &AppHandle, state: &DaemonState) -> Result<(), HostError> {
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = receiver.recv().await {
-            if matches!(event, CommandEvent::Terminated(_) | CommandEvent::Error(_)) {
+            let observation = match event {
+                CommandEvent::Terminated(_) => ProcessObservation::Terminated,
+                CommandEvent::Error(_) => ProcessObservation::StreamError,
+                _ => ProcessObservation::Output,
+            };
+            if should_replace_daemon(observation) {
                 let state = app_handle.state::<DaemonState>();
                 if let Ok(mut client) = state.client.write() {
                     client.take();

@@ -3,7 +3,9 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  cargoBuildArguments,
   parseHostTriple,
+  sidecarSource,
   sidecarDestination
 } from "./prepare-sidecar.mjs";
 
@@ -40,4 +42,29 @@ test("uses Tauri's target-suffixed external binary convention", () => {
 
 test("rejects rustc output without a host triple", () => {
   assert.throws(() => parseHostTriple("rustc 1.97.1"), /host triple/u);
+});
+
+test("release preparation builds and copies the release daemon", () => {
+  assert.deepEqual(cargoBuildArguments("release", "C:\\workspace"), [
+    "build",
+    "-p",
+    "kesharon-daemon",
+    "--release",
+    "--target-dir",
+    path.join("C:\\workspace", "target", "sidecar-release")
+  ]);
+  assert.equal(
+    sidecarSource("C:\\workspace", "release", "win32"),
+    path.join(
+      "C:\\workspace",
+      "target",
+      "sidecar-release",
+      "release",
+      "kesharon-daemon.exe"
+    )
+  );
+});
+
+test("rejects unknown build profiles", () => {
+  assert.throws(() => cargoBuildArguments("fast"), /build profile/u);
 });

@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use kesharon_daemon::Daemon;
 use kesharon_ipc::{LocalEndpoint, LocalServer, connect};
@@ -84,4 +85,53 @@ fn authenticated_local_socket_dispatches_a_health_frame() {
     server_thread
         .join()
         .expect("the server thread does not panic");
+}
+
+#[test]
+fn partial_authentication_cannot_hold_the_daemon_forever() {
+    let endpoint = unique_endpoint();
+    let server = LocalServer::bind(&endpoint).expect("the endpoint is available");
+    let daemon = Daemon::new(LaunchToken::parse_hex(TOKEN).expect("the fixture token is valid"));
+    let server_thread = thread::spawn(move || {
+        daemon.serve_local_connection_with_timeout(&server, Duration::from_millis(40))
+    });
+    let mut client = connect(&endpoint).expect("the server is listening");
+    client
+        .write_all(b"partial")
+        .expect("the partial authentication preface is writable");
+    let started = Instant::now();
+
+    assert!(
+        server_thread
+            .join()
+            .expect("the server thread does not panic")
+            .is_err()
+    );
+    assert!(started.elapsed() < Duration::from_millis(200));
+}
+
+#[test]
+fn partial_frame_cannot_hold_the_daemon_forever() {
+    let endpoint = unique_endpoint();
+    let server = LocalServer::bind(&endpoint).expect("the endpoint is available");
+    let daemon = Daemon::new(LaunchToken::parse_hex(TOKEN).expect("the fixture token is valid"));
+    let server_thread = thread::spawn(move || {
+        daemon.serve_local_connection_with_timeout(&server, Duration::from_millis(40))
+    });
+    let mut client = connect(&endpoint).expect("the server is listening");
+    client
+        .write_all(TOKEN.as_bytes())
+        .expect("the authentication preface is writable");
+    client
+        .write_all(&[0_u8, 1_u8])
+        .expect("the partial frame prefix is writable");
+    let started = Instant::now();
+
+    assert!(
+        server_thread
+            .join()
+            .expect("the server thread does not panic")
+            .is_err()
+    );
+    assert!(started.elapsed() < Duration::from_millis(200));
 }

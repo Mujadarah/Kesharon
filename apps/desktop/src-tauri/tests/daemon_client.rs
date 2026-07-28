@@ -1,4 +1,6 @@
+use std::io::{Read, Write};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use kesharon_daemon::Daemon;
 use kesharon_desktop_host::DaemonClient;
@@ -51,6 +53,39 @@ fn client_authenticates_and_decodes_daemon_health() {
 
     assert_eq!(health.status, HealthStatus::Ready);
     assert_eq!(health.protocol_version, PROTOCOL_VERSION);
+    server_thread
+        .join()
+        .expect("the server thread does not panic");
+}
+
+#[test]
+fn client_deadline_bounds_a_nonresponding_daemon() {
+    let endpoint = unique_endpoint();
+    let server = LocalServer::bind(&endpoint).expect("the endpoint is available");
+    let server_thread = thread::spawn(move || {
+        let mut stream = server.accept().expect("the client connects");
+        let mut token = [0_u8; 64];
+        stream
+            .read_exact(&mut token)
+            .expect("the token is readable");
+        let mut prefix = [0_u8; 4];
+        stream
+            .read_exact(&mut prefix)
+            .expect("the frame prefix is readable");
+        let length = u32::from_be_bytes(prefix) as usize;
+        let mut payload = vec![0_u8; length];
+        stream
+            .read_exact(&mut payload)
+            .expect("the frame payload is readable");
+        thread::sleep(Duration::from_millis(250));
+        let _ = stream.write_all(b"late");
+    });
+    let client = DaemonClient::new_with_timeout(endpoint, TOKEN.into(), Duration::from_millis(40))
+        .expect("the client configuration is valid");
+    let started = Instant::now();
+
+    assert!(client.health().is_err());
+    assert!(started.elapsed() < Duration::from_millis(200));
     server_thread
         .join()
         .expect("the server thread does not panic");

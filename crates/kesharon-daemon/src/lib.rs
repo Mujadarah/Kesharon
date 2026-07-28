@@ -3,8 +3,9 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::io::{Read, Write};
+use std::time::Duration;
 
-use kesharon_ipc::LocalServer;
+use kesharon_ipc::{LocalServer, read_exact_with_timeout, write_all_with_timeout};
 use kesharon_protocol::{
     HealthStatus, LaunchToken, MAX_FRAME_BYTES, PROTOCOL_VERSION, RequestMethod, ResponsePayload,
     ServerResponse, decode_client_request_frame, encode_frame,
@@ -77,17 +78,41 @@ impl Daemon {
     }
 
     pub fn serve_local_connection(&self, server: &LocalServer) -> Result<(), DaemonError> {
+        self.serve_local_connection_with_timeout(server, Duration::from_secs(5))
+    }
+
+    pub fn serve_local_connection_with_timeout(
+        &self,
+        server: &LocalServer,
+        timeout: Duration,
+    ) -> Result<(), DaemonError> {
         let stream = server
-            .accept()
+            .accept_with_timeout(timeout)
             .map_err(|error| DaemonError::Io(error.to_string()))?;
-        let mut reader = &stream;
-        let mut writer = &stream;
         let mut token = [0_u8; 64];
-        reader
-            .read_exact(&mut token)
+        read_exact_with_timeout(&stream, &mut token, timeout)
             .map_err(|error| DaemonError::Io(error.to_string()))?;
         let token = std::str::from_utf8(&token).map_err(|_| DaemonError::AuthenticationFailed)?;
-        self.serve_connection(token, &mut reader, &mut writer)
+
+        let mut prefix = [0_u8; 4];
+        read_exact_with_timeout(&stream, &mut prefix, timeout)
+            .map_err(|error| DaemonError::Io(error.to_string()))?;
+        let declared = u32::from_be_bytes(prefix) as usize;
+        if declared > MAX_FRAME_BYTES {
+            return Err(DaemonError::FrameTooLarge {
+                declared,
+                maximum: MAX_FRAME_BYTES,
+            });
+        }
+        let mut frame = Vec::with_capacity(declared + 4);
+        frame.extend_from_slice(&prefix);
+        frame.resize(declared + 4, 0);
+        read_exact_with_timeout(&stream, &mut frame[4..], timeout)
+            .map_err(|error| DaemonError::Io(error.to_string()))?;
+
+        let response = self.handle_authenticated_frame(token, &frame)?;
+        write_all_with_timeout(&stream, &response, timeout)
+            .map_err(|error| DaemonError::Io(error.to_string()))
     }
 }
 
