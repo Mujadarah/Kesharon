@@ -1,0 +1,31 @@
+.worktrees/
+
+# Rust
+target/
+
+# Node and frontend builds
+node_modules/
+dist/
+coverage/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Generated Tauri sidecars
+apps/desktop/src-tauri/binaries/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Test and runtime artifacts
+tmp/
+artifacts/
+*.log
+*.db
+*.db-shm
+*.db-wal
