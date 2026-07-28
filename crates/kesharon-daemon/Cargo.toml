@@ -1,0 +1,19 @@
+[package]
+name = "kesharon-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kesharon-application = { path = "../kesharon-application" }
+kesharon-ipc = { path = "../kesharon-ipc" }
+kesharon-protocol.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "kesharon-daemon"
+path = "src/main.rs"

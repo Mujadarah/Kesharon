@@ -1,0 +1,33 @@
+[package]
+name = "kesharon-desktop-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "kesharon_desktop_host"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "kesharon"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+kesharon-ipc = { path = "../../../crates/kesharon-ipc" }
+kesharon-protocol.workspace = true
+serde.workspace = true
+tauri.workspace = true
+tauri-plugin-shell.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+kesharon-daemon = { path = "../../../crates/kesharon-daemon" }
+
+[lints]
+workspace = true

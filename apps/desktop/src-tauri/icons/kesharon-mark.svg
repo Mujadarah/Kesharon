@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Kesharon">
+  <path
+    fill="#2457D6"
+    d="M144 32h208l128 128v208c0 62-50 112-112 112H144C82 480 32 430 32 368V144C32 82 82 32 144 32Z"
+  />
+  <path fill="#1946B4" d="M352 32v80c0 27 21 48 48 48h80L352 32Z" />
+  <path
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="56"
+    d="M174 142v228m12-112 134-116M190 270l142 100"
+  />
+</svg>
