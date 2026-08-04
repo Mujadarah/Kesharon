@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::io::{BufRead, Write};
 
-use kesharon_daemon::Daemon;
+use kesharon_daemon::{Daemon, ServerRuntime};
 use kesharon_ipc::{LocalEndpoint, LocalServer};
 use kesharon_protocol::{LaunchToken, PROTOCOL_VERSION};
 
@@ -43,9 +43,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    loop {
-        if let Err(error) = daemon.serve_local_connection(&server) {
-            eprintln!("kesharon-daemon: connection failed: {error}");
-        }
-    }
+    ServerRuntime::new(daemon).run(&server)?;
+    Ok(())
 }

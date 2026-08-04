@@ -13,6 +13,10 @@ pub trait IdGenerator {
     fn next_id(&self) -> String;
 }
 
+pub trait CancellationSignal {
+    fn is_cancelled(&self) -> bool;
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepositoryInspection {
     pub canonical_root: String,
@@ -35,8 +39,18 @@ impl<'a, R: RepositoryService + ?Sized, I: IdGenerator + ?Sized> OpenProject<'a,
         Self { repository, ids }
     }
 
-    pub fn execute(&self, command: &OpenProjectCommand) -> Result<Project, ApplicationError> {
+    pub fn execute(
+        &self,
+        command: &OpenProjectCommand,
+        cancellation: &impl CancellationSignal,
+    ) -> Result<Project, ApplicationError> {
+        if cancellation.is_cancelled() {
+            return Err(ApplicationError::Cancelled);
+        }
         let inspection = self.repository.inspect(&command.requested_path)?;
+        if cancellation.is_cancelled() {
+            return Err(ApplicationError::Cancelled);
+        }
         let id = ProjectId::new(self.ids.next_id())
             .map_err(|error| ApplicationError::InvalidProject(error.to_string()))?;
 
@@ -54,6 +68,7 @@ impl<'a, R: RepositoryService + ?Sized, I: IdGenerator + ?Sized> OpenProject<'a,
 pub enum ApplicationError {
     Repository(String),
     InvalidProject(String),
+    Cancelled,
 }
 
 impl Display for ApplicationError {
@@ -61,6 +76,7 @@ impl Display for ApplicationError {
         match self {
             Self::Repository(message) => write!(formatter, "repository error: {message}"),
             Self::InvalidProject(message) => write!(formatter, "invalid project: {message}"),
+            Self::Cancelled => formatter.write_str("operation was cancelled"),
         }
     }
 }

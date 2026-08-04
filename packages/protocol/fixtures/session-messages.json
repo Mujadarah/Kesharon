@@ -1,0 +1,144 @@
+{
+  "healthRequest": {
+    "protocolVersion": 1,
+    "requestId": "request-health-1",
+    "method": { "type": "health" },
+    "idempotencyKey": null
+  },
+  "openProjectRequest": {
+    "protocolVersion": 1,
+    "requestId": "request-open-1",
+    "method": { "type": "openProject", "path": "D:\\code\\kesharon" },
+    "idempotencyKey": "open-key-1"
+  },
+  "cancelRequest": {
+    "protocolVersion": 1,
+    "requestId": "request-cancel-1",
+    "method": { "type": "cancelRequest", "targetRequestId": "request-open-1" },
+    "idempotencyKey": "cancel-key-1"
+  },
+  "subscribeEventsRequest": {
+    "protocolVersion": 1,
+    "requestId": "request-subscribe-1",
+    "method": { "type": "subscribeEvents" },
+    "idempotencyKey": null
+  },
+  "healthResponse": {
+    "protocolVersion": 1,
+    "requestId": "request-health-1",
+    "result": { "type": "health", "status": "ready", "protocolVersion": 1 },
+    "error": null
+  },
+  "projectOpenedResponse": {
+    "protocolVersion": 1,
+    "requestId": "request-open-1",
+    "result": {
+      "type": "projectOpened",
+      "project": {
+        "id": "project-1",
+        "displayName": "Kesharon",
+        "canonicalRoot": "D:\\code\\kesharon",
+        "trusted": false
+      }
+    },
+    "error": null
+  },
+  "cancellationResponse": {
+    "protocolVersion": 1,
+    "requestId": "request-cancel-1",
+    "result": {
+      "type": "cancellation",
+      "targetRequestId": "request-open-1",
+      "outcome": "accepted"
+    },
+    "error": null
+  },
+  "subscriptionReadyResponse": {
+    "protocolVersion": 1,
+    "requestId": "request-subscribe-1",
+    "result": { "type": "subscriptionReady", "streamId": "stream-1" },
+    "error": null
+  },
+  "failureResponse": {
+    "protocolVersion": 1,
+    "requestId": "request-open-failed",
+    "result": null,
+    "error": {
+      "code": "notGitRepository",
+      "message": "Selected directory is not a Git worktree"
+    }
+  },
+  "snapshotMessage": {
+    "messageType": "snapshot",
+    "snapshot": {
+      "streamId": "stream-1",
+      "lastSequence": 4,
+      "project": {
+        "id": "project-1",
+        "displayName": "Kesharon",
+        "canonicalRoot": "D:\\code\\kesharon",
+        "trusted": false
+      },
+      "activeOperations": [
+        { "requestId": "request-open-2", "kind": "openProject", "status": "running" }
+      ]
+    }
+  },
+  "eventMessage": {
+    "messageType": "event",
+    "event": {
+      "protocolVersion": 1,
+      "streamId": "stream-1",
+      "sequence": 5,
+      "payload": {
+        "type": "projectOpened",
+        "requestId": "request-open-1",
+        "project": {
+          "id": "project-1",
+          "displayName": "Kesharon",
+          "canonicalRoot": "D:\\code\\kesharon",
+          "trusted": false
+        }
+      }
+    }
+  },
+  "operationStartedMessage": {
+    "messageType": "event",
+    "event": {
+      "protocolVersion": 1,
+      "streamId": "stream-1",
+      "sequence": 4,
+      "payload": {
+        "type": "operationStarted",
+        "requestId": "request-open-1",
+        "kind": "openProject"
+      }
+    }
+  },
+  "operationCancelledMessage": {
+    "messageType": "event",
+    "event": {
+      "protocolVersion": 1,
+      "streamId": "stream-1",
+      "sequence": 7,
+      "payload": {
+        "type": "operationCancelled",
+        "requestId": "request-open-1"
+      }
+    }
+  },
+  "failureEventMessage": {
+    "messageType": "event",
+    "event": {
+      "protocolVersion": 1,
+      "streamId": "stream-1",
+      "sequence": 6,
+      "payload": {
+        "type": "operationFailed",
+        "requestId": "request-open-failed",
+        "code": "notGitRepository",
+        "message": "Selected directory is not a Git worktree"
+      }
+    }
+  }
+}

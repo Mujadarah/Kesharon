@@ -8,8 +8,10 @@ repository.workspace = true
 
 [dependencies]
 kesharon-application = { path = "../kesharon-application" }
+kesharon-domain.workspace = true
 kesharon-ipc = { path = "../kesharon-ipc" }
 kesharon-protocol.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

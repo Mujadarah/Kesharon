@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use kesharon_ipc::{LocalEndpoint, LocalServer, connect};
 
@@ -60,6 +61,37 @@ fn local_socket_round_trip_uses_a_cross_platform_stream() {
 #[test]
 fn blank_endpoint_is_rejected() {
     assert!(LocalEndpoint::new("  ").is_err());
+}
+
+#[test]
+fn accept_timeout_expires_before_a_late_client_connects() {
+    let endpoint = unique_endpoint();
+    let server = LocalServer::bind(&endpoint).expect("the endpoint is available");
+    let client_endpoint = endpoint.clone();
+    let client = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(150));
+        connect(&client_endpoint).expect("late client can still connect")
+    });
+
+    let started = Instant::now();
+    let result = server.accept_with_timeout(Duration::from_millis(40));
+    let elapsed = started.elapsed();
+    let _late_client = client.join().expect("late client thread does not panic");
+
+    assert_eq!(
+        result.expect_err("accept must time out").kind(),
+        std::io::ErrorKind::TimedOut
+    );
+    assert!(elapsed < Duration::from_millis(120));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_pipe_uses_a_protected_creator_owner_descriptor() {
+    assert_eq!(
+        kesharon_ipc::windows_pipe_sddl(),
+        "D:P(A;;GA;;;OW)(A;;GA;;;SY)"
+    );
 }
 
 #[cfg(unix)]

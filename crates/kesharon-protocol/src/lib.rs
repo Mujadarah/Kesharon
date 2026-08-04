@@ -48,18 +48,28 @@ impl ClientRequest {
     pub fn method(&self) -> &RequestMethod {
         &self.method
     }
+
+    pub fn idempotency_key(&self) -> Option<&str> {
+        self.idempotency_key.as_deref()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum RequestMethod {
     Health,
     OpenProject { path: String },
+    CancelRequest { target_request_id: String },
+    SubscribeEvents,
 }
 
 impl RequestMethod {
     const fn requires_idempotency_key(&self) -> bool {
-        matches!(self, Self::OpenProject { .. })
+        matches!(self, Self::OpenProject { .. } | Self::CancelRequest { .. })
     }
 }
 
@@ -86,18 +96,212 @@ impl ServerResponse {
         self.result.as_ref()
     }
 
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
     pub const fn error(&self) -> Option<&ErrorPayload> {
         self.error.as_ref()
+    }
+
+    pub fn failure(
+        request_id: impl Into<String>,
+        code: ErrorCode,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: request_id.into(),
+            result: None,
+            error: Some(ErrorPayload {
+                code,
+                message: message.into(),
+            }),
+        }
+    }
+
+    #[must_use]
+    pub fn with_request_id(&self, request_id: impl Into<String>) -> Self {
+        let mut replay = self.clone();
+        replay.request_id = request_id.into();
+        replay
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum ResponsePayload {
     Health {
         status: HealthStatus,
         protocol_version: u16,
     },
+    ProjectOpened {
+        project: ProjectSnapshot,
+    },
+    Cancellation {
+        target_request_id: String,
+        outcome: CancellationOutcome,
+    },
+    SubscriptionReady {
+        stream_id: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CancellationOutcome {
+    Accepted,
+    AlreadyFinished,
+    NotFound,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSnapshot {
+    pub id: String,
+    pub display_name: String,
+    pub canonical_root: String,
+    pub trusted: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationKind {
+    OpenProject,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationStatus {
+    Running,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationSnapshot {
+    pub request_id: String,
+    pub kind: OperationKind,
+    pub status: OperationStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSnapshot {
+    stream_id: String,
+    last_sequence: u64,
+    project: Option<ProjectSnapshot>,
+    active_operations: Vec<OperationSnapshot>,
+}
+
+impl WorkspaceSnapshot {
+    pub fn new(
+        stream_id: impl Into<String>,
+        last_sequence: u64,
+        project: Option<ProjectSnapshot>,
+        active_operations: Vec<OperationSnapshot>,
+    ) -> Self {
+        Self {
+            stream_id: stream_id.into(),
+            last_sequence,
+            project,
+            active_operations,
+        }
+    }
+
+    pub fn stream_id(&self) -> &str {
+        &self.stream_id
+    }
+
+    pub const fn last_sequence(&self) -> u64 {
+        self.last_sequence
+    }
+
+    pub const fn project(&self) -> Option<&ProjectSnapshot> {
+        self.project.as_ref()
+    }
+
+    pub fn active_operations(&self) -> &[OperationSnapshot] {
+        &self.active_operations
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum DaemonEventPayload {
+    OperationStarted {
+        request_id: String,
+        kind: OperationKind,
+    },
+    ProjectOpened {
+        request_id: String,
+        project: ProjectSnapshot,
+    },
+    OperationCancelled {
+        request_id: String,
+    },
+    OperationFailed {
+        request_id: String,
+        code: ErrorCode,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonEvent {
+    protocol_version: u16,
+    stream_id: String,
+    sequence: u64,
+    payload: DaemonEventPayload,
+}
+
+impl DaemonEvent {
+    pub fn new(
+        stream_id: impl Into<String>,
+        sequence: u64,
+        payload: DaemonEventPayload,
+    ) -> Result<Self, ProtocolError> {
+        if sequence == 0 {
+            return Err(ProtocolError::InvalidEventSequence);
+        }
+        Ok(Self {
+            protocol_version: PROTOCOL_VERSION,
+            stream_id: stream_id.into(),
+            sequence,
+            payload,
+        })
+    }
+
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn stream_id(&self) -> &str {
+        &self.stream_id
+    }
+
+    pub const fn payload(&self) -> &DaemonEventPayload {
+        &self.payload
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "messageType"
+)]
+pub enum StreamMessage {
+    Snapshot { snapshot: WorkspaceSnapshot },
+    Event { event: DaemonEvent },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -107,11 +311,33 @@ pub enum HealthStatus {
     Degraded,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorCode {
+    InvalidRequest,
+    NotGitRepository,
+    ProjectPathUnavailable,
+    OperationCancelled,
+    RequestInProgress,
+    ServerBusy,
+    InternalError,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorPayload {
-    code: String,
+    code: ErrorCode,
     message: String,
+}
+
+impl ErrorPayload {
+    pub const fn code(&self) -> ErrorCode {
+        self.code
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 pub fn encode_frame<T: Serialize>(message: &T) -> Result<Vec<u8>, ProtocolError> {
@@ -158,16 +384,25 @@ pub fn decode_server_response_frame(frame: &[u8]) -> Result<ServerResponse, Prot
     Ok(response)
 }
 
+pub fn decode_stream_message_frame(frame: &[u8]) -> Result<StreamMessage, ProtocolError> {
+    let message: StreamMessage = decode_frame(frame)?;
+    if let StreamMessage::Event { event } = &message {
+        if event.protocol_version != PROTOCOL_VERSION {
+            return Err(ProtocolError::UnsupportedVersion(event.protocol_version));
+        }
+        if event.sequence == 0 {
+            return Err(ProtocolError::InvalidEventSequence);
+        }
+    }
+    Ok(message)
+}
+
 fn decode_frame<T: DeserializeOwned>(frame: &[u8]) -> Result<T, ProtocolError> {
     if frame.len() < 4 {
         return Err(ProtocolError::IncompleteLengthPrefix);
     }
 
-    let declared = u32::from_be_bytes(
-        frame[..4]
-            .try_into()
-            .expect("a four-byte slice always converts to a four-byte array"),
-    ) as usize;
+    let declared = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;
     if declared > MAX_FRAME_BYTES {
         return Err(ProtocolError::FrameTooLarge {
             declared,
@@ -232,6 +467,7 @@ pub enum ProtocolError {
     MissingIdempotencyKey,
     InvalidLaunchToken,
     InvalidResponseShape,
+    InvalidEventSequence,
 }
 
 impl Display for ProtocolError {
@@ -262,6 +498,9 @@ impl Display for ProtocolError {
             Self::InvalidLaunchToken => formatter.write_str("launch token must be 256-bit hex"),
             Self::InvalidResponseShape => {
                 formatter.write_str("response must contain exactly one result or error")
+            }
+            Self::InvalidEventSequence => {
+                formatter.write_str("event sequence must be greater than zero")
             }
         }
     }

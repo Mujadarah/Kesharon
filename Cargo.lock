@@ -1647,8 +1647,10 @@ name = "kesharon-daemon"
 version = "0.0.0"
 dependencies = [
  "kesharon-application",
+ "kesharon-domain",
  "kesharon-ipc",
  "kesharon-protocol",
+ "uuid",
 ]
 
 [[package]]
@@ -1675,6 +1677,7 @@ name = "kesharon-ipc"
 version = "0.0.0"
 dependencies = [
  "interprocess",
+ "widestring",
 ]
 
 [[package]]

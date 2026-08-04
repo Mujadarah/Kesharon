@@ -5,11 +5,24 @@ use std::fmt::{Display, Formatter};
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
+use interprocess::ConnectWaitMode;
 #[cfg(unix)]
 use interprocess::local_socket::GenericFilePath;
 #[cfg(windows)]
 use interprocess::local_socket::GenericNamespaced;
-use interprocess::local_socket::{Listener, ListenerOptions, Stream, prelude::*};
+use interprocess::local_socket::{
+    ConnectOptions, Listener, ListenerNonblockingMode, ListenerOptions, Stream, prelude::*,
+};
+
+pub type LocalStream = Stream;
+
+#[cfg(windows)]
+const WINDOWS_PIPE_SDDL: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
+
+#[cfg(windows)]
+pub const fn windows_pipe_sddl() -> &'static str {
+    WINDOWS_PIPE_SDDL
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalEndpoint(String);
@@ -40,17 +53,32 @@ impl LocalServer {
         #[cfg(unix)]
         let name = std::path::Path::new(endpoint.as_str()).to_fs_name::<GenericFilePath>()?;
 
-        let listener = ListenerOptions::new()
-            .name(name)
-            .try_overwrite(true)
-            .create_sync()?;
+        #[cfg(windows)]
+        let listener = {
+            use interprocess::os::windows::local_socket::ListenerOptionsExt;
+            use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+            use widestring::U16CString;
+
+            let sddl = U16CString::from_str(WINDOWS_PIPE_SDDL)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+            let descriptor = SecurityDescriptor::deserialize(&sddl)?;
+            ListenerOptions::new()
+                .name(name)
+                .try_overwrite(true)
+                .security_descriptor(descriptor)
+                .create_sync()?
+        };
 
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
+        let listener = {
+            use interprocess::os::unix::local_socket::ListenerOptionsExt;
 
-            std::fs::set_permissions(endpoint.as_str(), std::fs::Permissions::from_mode(0o600))?;
-        }
+            ListenerOptions::new()
+                .name(name)
+                .try_overwrite(true)
+                .mode(0o600)
+                .create_sync()?
+        };
 
         Ok(Self { listener })
     }
@@ -60,15 +88,28 @@ impl LocalServer {
     }
 
     pub fn accept_with_timeout(&self, timeout: Duration) -> io::Result<Stream> {
-        let stream = self.accept()?;
         if timeout.is_zero() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "I/O timeout must be positive",
             ));
         }
-        stream.set_nonblocking(true)?;
-        Ok(stream)
+        self.listener
+            .set_nonblocking(ListenerNonblockingMode::Accept)?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.listener.accept() {
+                Ok(stream) => {
+                    stream.set_nonblocking(true)?;
+                    return Ok(stream);
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    wait_for_io(deadline)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 }
 
@@ -83,13 +124,22 @@ pub fn connect(endpoint: &LocalEndpoint) -> io::Result<Stream> {
 }
 
 pub fn connect_with_timeout(endpoint: &LocalEndpoint, timeout: Duration) -> io::Result<Stream> {
-    let stream = connect(endpoint)?;
     if timeout.is_zero() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "I/O timeout must be positive",
         ));
     }
+    #[cfg(windows)]
+    let name = endpoint.as_str().to_ns_name::<GenericNamespaced>()?;
+
+    #[cfg(unix)]
+    let name = std::path::Path::new(endpoint.as_str()).to_fs_name::<GenericFilePath>()?;
+
+    let stream = ConnectOptions::new()
+        .name(name)
+        .wait_mode(ConnectWaitMode::Timeout(timeout))
+        .connect_sync()?;
     stream.set_nonblocking(true)?;
     Ok(stream)
 }

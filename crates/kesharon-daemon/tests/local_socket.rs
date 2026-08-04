@@ -6,7 +6,8 @@ use kesharon_daemon::Daemon;
 use kesharon_ipc::{LocalEndpoint, LocalServer, connect};
 use kesharon_protocol::{
     ClientRequest, HealthStatus, LaunchToken, PROTOCOL_VERSION, RequestMethod, ResponsePayload,
-    ServerResponse, decode_server_response_frame, encode_frame,
+    ServerResponse, StreamMessage, decode_server_response_frame, decode_stream_message_frame,
+    encode_frame,
 };
 
 const TOKEN: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -36,6 +37,21 @@ fn unique_endpoint() -> LocalEndpoint {
         .into_owned();
 
     LocalEndpoint::new(value).expect("the generated endpoint is valid")
+}
+
+fn read_frame(reader: &mut impl Read) -> Vec<u8> {
+    let mut prefix = [0_u8; 4];
+    reader
+        .read_exact(&mut prefix)
+        .expect("frame prefix is readable");
+    let length = u32::from_be_bytes(prefix) as usize;
+    let mut frame = Vec::with_capacity(length + 4);
+    frame.extend_from_slice(&prefix);
+    frame.resize(length + 4, 0);
+    reader
+        .read_exact(&mut frame[4..])
+        .expect("frame payload is readable");
+    frame
 }
 
 #[test]
@@ -134,4 +150,42 @@ fn partial_frame_cannot_hold_the_daemon_forever() {
             .is_err()
     );
     assert!(started.elapsed() < Duration::from_millis(200));
+}
+
+#[test]
+fn event_subscription_starts_with_an_authoritative_snapshot() {
+    let endpoint = unique_endpoint();
+    let server = LocalServer::bind(&endpoint).expect("the endpoint is available");
+    let daemon = Daemon::new(LaunchToken::parse_hex(TOKEN).expect("the fixture token is valid"));
+    let server_thread = thread::spawn(move || {
+        daemon
+            .serve_local_connection(&server)
+            .expect("subscription request is valid");
+    });
+    let mut stream = connect(&endpoint).expect("the client connects");
+    stream
+        .write_all(TOKEN.as_bytes())
+        .expect("authentication is written");
+    let request = ClientRequest::new("subscribe-1", RequestMethod::SubscribeEvents, None)
+        .expect("subscription request is valid");
+    stream
+        .write_all(&encode_frame(&request).expect("request encodes"))
+        .expect("request is written");
+
+    let ready = read_frame(&mut stream);
+    let snapshot = read_frame(&mut stream);
+
+    assert!(matches!(
+        decode_server_response_frame(&ready)
+            .expect("subscription-ready response is valid")
+            .result(),
+        Some(ResponsePayload::SubscriptionReady { .. })
+    ));
+    assert!(matches!(
+        decode_stream_message_frame(&snapshot).expect("snapshot is valid"),
+        StreamMessage::Snapshot { snapshot }
+            if snapshot.last_sequence() == 0 && snapshot.project().is_none()
+    ));
+    drop(stream);
+    drop(server_thread);
 }
