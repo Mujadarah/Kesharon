@@ -85,7 +85,19 @@ impl LocalServer {
                 options.mode(0o600)
             };
 
-            options.create_sync()?
+            let listener = options.create_sync()?;
+
+            #[cfg(target_os = "macos")]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                std::fs::set_permissions(
+                    endpoint.as_str(),
+                    std::fs::Permissions::from_mode(0o600),
+                )?;
+            }
+
+            listener
         };
 
         Ok(Self { listener })
