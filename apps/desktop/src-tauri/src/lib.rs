@@ -265,6 +265,12 @@ fn start_daemon(app: &AppHandle, state: &DaemonState) -> Result<(), HostError> {
         .map_err(|error| HostError::Runtime(error.to_string()))?
         .join("ipc");
     std::fs::create_dir_all(&socket_directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(&socket_directory, std::fs::Permissions::from_mode(0o700))?;
+    }
 
     let launch = LaunchConfiguration::generate(socket_directory)?;
     let endpoint_argument = launch.endpoint().as_str().to_owned();

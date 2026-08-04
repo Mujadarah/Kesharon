@@ -71,13 +71,21 @@ impl LocalServer {
 
         #[cfg(unix)]
         let listener = {
-            use interprocess::os::unix::local_socket::ListenerOptionsExt;
+            let options = ListenerOptions::new().name(name).try_overwrite(true);
 
-            ListenerOptions::new()
-                .name(name)
-                .try_overwrite(true)
-                .mode(0o600)
-                .create_sync()?
+            #[cfg(any(
+                target_os = "android",
+                target_os = "freebsd",
+                target_os = "linux",
+                target_os = "openbsd"
+            ))]
+            let options = {
+                use interprocess::os::unix::local_socket::ListenerOptionsExt;
+
+                options.mode(0o600)
+            };
+
+            options.create_sync()?
         };
 
         Ok(Self { listener })
