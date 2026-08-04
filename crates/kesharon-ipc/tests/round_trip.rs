@@ -1,30 +1,21 @@
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use kesharon_ipc::{LocalEndpoint, LocalServer, connect};
 
+static NEXT_ENDPOINT_ID: AtomicU64 = AtomicU64::new(0);
+
 fn unique_endpoint() -> LocalEndpoint {
+    let endpoint_id = NEXT_ENDPOINT_ID.fetch_add(1, Ordering::Relaxed);
+
     #[cfg(windows)]
-    let value = format!(
-        "kesharon-test-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the clock is after the Unix epoch")
-            .as_nanos()
-    );
+    let value = format!("kesharon-test-{}-{}", std::process::id(), endpoint_id);
 
     #[cfg(unix)]
     let value = std::env::temp_dir()
-        .join(format!(
-            "k-{:x}-{:x}.sock",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("the clock is after the Unix epoch")
-                .as_nanos()
-        ))
+        .join(format!("k-{:x}-{endpoint_id:x}.sock", std::process::id()))
         .to_string_lossy()
         .into_owned();
 

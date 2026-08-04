@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use kesharon_ipc::{
@@ -15,28 +16,21 @@ use kesharon_protocol::{
 };
 
 const TOKEN: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+static NEXT_ENDPOINT_ID: AtomicU64 = AtomicU64::new(0);
 
 fn unique_endpoint() -> LocalEndpoint {
+    let endpoint_id = NEXT_ENDPOINT_ID.fetch_add(1, Ordering::Relaxed);
+
     #[cfg(windows)]
     let value = format!(
         "kesharon-process-test-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the clock is after the Unix epoch")
-            .as_nanos()
+        endpoint_id
     );
 
     #[cfg(unix)]
     let value = std::env::temp_dir()
-        .join(format!(
-            "k-{:x}-{:x}.sock",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("the clock is after the Unix epoch")
-                .as_nanos()
-        ))
+        .join(format!("k-{:x}-{endpoint_id:x}.sock", std::process::id()))
         .to_string_lossy()
         .into_owned();
 
