@@ -70,7 +70,7 @@ impl DaemonProcess {
         stdout
             .read_line(&mut ready)
             .expect("the readiness line is readable");
-        assert_eq!(ready, "READY 1\n");
+        assert_daemon_ready(&mut child, &ready);
         Self { child, endpoint }
     }
 }
@@ -120,6 +120,22 @@ fn workspace_root() -> String {
         .into_owned()
 }
 
+fn assert_daemon_ready(child: &mut Child, ready: &str) {
+    if ready == "READY 1\n" {
+        return;
+    }
+
+    let status = child.wait().expect("the failed daemon process exits");
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .expect("daemon stderr is piped")
+        .read_to_string(&mut stderr)
+        .expect("daemon stderr is readable");
+    panic!("daemon did not become ready; status={status}, stdout={ready:?}, stderr={stderr:?}");
+}
+
 #[test]
 fn daemon_process_reads_token_from_stdin_and_serves_the_local_endpoint() {
     let endpoint = unique_endpoint();
@@ -141,7 +157,7 @@ fn daemon_process_reads_token_from_stdin_and_serves_the_local_endpoint() {
     stdout
         .read_line(&mut ready)
         .expect("the readiness line is readable");
-    assert_eq!(ready, "READY 1\n");
+    assert_daemon_ready(&mut child, &ready);
 
     let request = ClientRequest::new("request-process-1", RequestMethod::Health, None)
         .expect("health requests are valid");
