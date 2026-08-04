@@ -33,7 +33,8 @@ pub struct LaunchConfiguration {
 }
 
 impl LaunchConfiguration {
-    pub fn generate(_socket_directory: impl AsRef<Path>) -> Result<Self, HostError> {
+    #[cfg_attr(windows, allow(unused_variables))]
+    pub fn generate(socket_directory: impl AsRef<Path>) -> Result<Self, HostError> {
         let mut token = [0_u8; 32];
         getrandom::fill(&mut token).map_err(|error| HostError::Random(error.to_string()))?;
         let mut launch_token = String::with_capacity(64);
@@ -46,7 +47,7 @@ impl LaunchConfiguration {
         let endpoint_value = format!("kesharon-daemon-{}", uuid::Uuid::now_v7());
 
         #[cfg(unix)]
-        let endpoint_value = _socket_directory
+        let endpoint_value = socket_directory
             .as_ref()
             .join(format!("kesharon-daemon-{}.sock", uuid::Uuid::now_v7()))
             .to_string_lossy()
