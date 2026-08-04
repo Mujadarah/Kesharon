@@ -49,7 +49,7 @@ impl LaunchConfiguration {
         #[cfg(unix)]
         let endpoint_value = socket_directory
             .as_ref()
-            .join(format!("kesharon-daemon-{}.sock", uuid::Uuid::now_v7()))
+            .join(format!("k-{}.sock", uuid::Uuid::now_v7().simple()))
             .to_string_lossy()
             .into_owned();
 

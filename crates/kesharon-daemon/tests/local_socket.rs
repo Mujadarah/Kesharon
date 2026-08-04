@@ -26,7 +26,7 @@ fn unique_endpoint() -> LocalEndpoint {
     #[cfg(unix)]
     let value = std::env::temp_dir()
         .join(format!(
-            "kesharon-daemon-test-{}-{}.sock",
+            "k-{:x}-{:x}.sock",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
