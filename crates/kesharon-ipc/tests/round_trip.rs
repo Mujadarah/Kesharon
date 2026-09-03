@@ -78,7 +78,7 @@ fn accept_timeout_expires_before_a_late_client_connects() {
 
 #[cfg(windows)]
 #[test]
-fn windows_pipe_uses_a_protected_creator_owner_descriptor() {
+fn windows_pipe_uses_a_protected_owner_rights_descriptor() {
     assert_eq!(
         kesharon_ipc::windows_pipe_sddl(),
         "D:P(A;;GA;;;OW)(A;;GA;;;SY)"

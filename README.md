@@ -43,7 +43,7 @@ production build pass locally.
 
 macOS and Linux native builds are configured in CI but remain unverified until
 the first hosted run completes. See
-[the Windows foundation evidence](docs/evidence/2026-07-29-foundation-windows.md)
+[the Windows reliability evidence](docs/evidence/2026-09-03-m1-reliability.md)
 for the exact boundary.
 
 ## Development prerequisites

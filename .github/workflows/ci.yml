@@ -97,3 +97,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm prepare:sidecar:release
       - run: pnpm --filter @kesharon/desktop tauri build --no-bundle
+
+  windows-pipe-acl:
+    name: Windows pipe ACL isolation proof
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+      - name: Build daemon binary
+        run: cargo build -p kesharon-daemon
+      - name: Run Windows pipe ACL isolation probe
+        run: pwsh -NoProfile -File scripts/test-windows-pipe-acl.ps1 -DaemonPath target/debug/kesharon-daemon.exe
