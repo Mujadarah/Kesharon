@@ -137,15 +137,36 @@ try {
     if ($isAdmin) {
         $randSuffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
         $secondaryUser = "kesharon_tst_$randSuffix"
-        $secPassword = "Kesh!$([guid]::NewGuid().ToString("N"))9A#"
+        $credCharset = [char[]]"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+        $credChars = 1..12 | ForEach-Object { $credCharset[(Get-Random -Maximum $credCharset.Length)] }
+        $secAuthToken = -join ($credChars + @('!', '9'))
+        $secSecureToken = ConvertTo-SecureString $secAuthToken -AsPlainText -Force
 
         Write-Host "Admin privileges detected. Creating secondary local test user: $secondaryUser"
-        $createOutput = & net user $secondaryUser $secPassword /add 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            if ($AllowInconclusive) {
-                Write-Warning "Could not create secondary user ($createOutput). Skipping secondary user probe."
+        $userCreated = $false
+        $createError = ""
+
+        try {
+            New-LocalUser -Name $secondaryUser -Password $secSecureToken -FullName "Kesharon Pipe Test" -Description "Ephemeral probe" -ErrorAction Stop | Out-Null
+            $userCreated = $true
+        } catch {
+            $createError = $_.Exception.Message
+        }
+
+        if (-not $userCreated) {
+            $createOutput = & net.exe user $secondaryUser "$secAuthToken" /add 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $userCreated = $true
             } else {
-                Write-Error "INCONCLUSIVE_ACL_PROBE: Failed to create secondary test user ($createOutput). Secondary-user denial proof cannot proceed."
+                $createError = "$createError; $createOutput"
+            }
+        }
+
+        if (-not $userCreated) {
+            if ($AllowInconclusive) {
+                Write-Warning "Could not create secondary user ($createError). Skipping secondary user probe."
+            } else {
+                Write-Error "INCONCLUSIVE_ACL_PROBE: Failed to create secondary test user ($createError). Secondary-user denial proof cannot proceed."
                 exit 1
             }
         } else {
@@ -200,7 +221,7 @@ public class PipeAclTester {
             if (-not ([System.Management.Automation.PSTypeName]'PipeAclTester').Type) {
                 Add-Type -TypeDefinition $logonCode -Language CSharp
             }
-            $probeResult = [PipeAclTester]::ProbePipe($secondaryUser, $secPassword, $endpoint)
+            $probeResult = [PipeAclTester]::ProbePipe($secondaryUser, $secAuthToken, $endpoint)
             Write-Host "Secondary user connection probe result: $probeResult"
 
             if ($probeResult.StartsWith("ACCESS_DENIED")) {
@@ -245,7 +266,10 @@ finally {
     if ($secondaryUser) {
         Write-Host "Cleaning up secondary test user: $secondaryUser..."
         try {
-            & net user $secondaryUser /delete 2>&1 | Out-Null
+            Remove-LocalUser -Name $secondaryUser -ErrorAction SilentlyContinue
+        } catch {}
+        try {
+            & net.exe user $secondaryUser /delete 2>&1 | Out-Null
         } catch {}
     }
 }
