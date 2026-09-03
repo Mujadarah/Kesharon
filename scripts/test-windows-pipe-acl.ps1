@@ -3,7 +3,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$DaemonPath = "target\release\kesharon-daemon.exe"
+    [string]$DaemonPath = "target\release\kesharon-daemon.exe",
+    [switch]$AllowInconclusive = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,25 @@ if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Syst
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
+
+function Read-Exact {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Stream]$Stream,
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Buffer,
+        [Parameter(Mandatory = $true)]
+        [int]$Count
+    )
+    $offset = 0
+    while ($offset -lt $Count) {
+        $read = $Stream.Read($Buffer, $offset, $Count - $offset)
+        if ($read -le 0) {
+            throw "Unexpected EOF while reading exact stream: expected $Count bytes, but got $offset"
+        }
+        $offset += $read
+    }
+}
 
 if (-not (Test-Path $DaemonPath)) {
     if (Test-Path "target\debug\kesharon-daemon.exe") {
@@ -86,15 +106,16 @@ try {
     $sameUserClient.Flush()
 
     $respLengthBytes = New-Object byte[] 4
-    $readLen = $sameUserClient.Read($respLengthBytes, 0, 4)
-    if ($readLen -ne 4) {
-        Write-Error "Failed to read response frame length prefix"
+    Read-Exact -Stream $sameUserClient -Buffer $respLengthBytes -Count 4
+    $respLength = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($respLengthBytes, 0))
+    if ($respLength -le 0 -or $respLength -gt (8 * 1024 * 1024)) {
+        Write-Error "Invalid response length declared: $respLength"
         exit 1
     }
-    $respLength = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($respLengthBytes, 0))
+
     $respPayload = New-Object byte[] $respLength
-    $readPayload = $sameUserClient.Read($respPayload, 0, $respLength)
-    $respJson = [System.Text.Encoding]::UTF8.GetString($respPayload, 0, $readPayload)
+    Read-Exact -Stream $sameUserClient -Buffer $respPayload -Count $respLength
+    $respJson = [System.Text.Encoding]::UTF8.GetString($respPayload)
     Write-Host "Same-user health check verified: $respJson"
     $sameUserClient.Dispose()
 
@@ -107,7 +128,12 @@ try {
         Write-Host "Admin privileges detected. Creating secondary local test user: $secondaryUser"
         $createOutput = & net user $secondaryUser $secPassword /add 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Could not create secondary user ($createOutput). Checking pipe ACL directly."
+            if ($AllowInconclusive) {
+                Write-Warning "Could not create secondary user ($createOutput). Skipping secondary user probe."
+            } else {
+                Write-Error "INCONCLUSIVE_ACL_PROBE: Failed to create secondary test user ($createOutput). Secondary-user denial proof cannot proceed."
+                exit 1
+            }
         } else {
             Write-Host "Testing secondary user access denial via logon impersonation..."
 
@@ -166,15 +192,21 @@ public class PipeAclTester {
             } elseif ($probeResult -eq "UNEXPECTED_SUCCESS") {
                 Write-Error "SECURITY VULNERABILITY: Secondary user was able to connect to named pipe!"
                 exit 1
-            } elseif ($probeResult.StartsWith("LOGON_FAILED")) {
-                Write-Warning "Local user logon not permitted by local policy in this environment ($probeResult)."
+            } elseif ($AllowInconclusive) {
+                Write-Warning "Secondary user logon/probe was inconclusive: $probeResult"
             } else {
-                Write-Host "Probe output: $probeResult"
+                Write-Error "INCONCLUSIVE_ACL_PROBE: Secondary user connection probe failed to prove denial: $probeResult"
+                exit 1
             }
         }
     } else {
-        Write-Host "Host running without admin privileges (cannot create secondary account locally)."
-        Write-Host "Local pipe SDDL verification passed: D:P(A;;GA;;;OW)(A;;GA;;;SY)"
+        if ($AllowInconclusive) {
+            Write-Warning "Host running without admin privileges (cannot create secondary account locally)."
+            Write-Host "Local pipe SDDL verification passed: D:P(A;;GA;;;OW)(A;;GA;;;SY)"
+        } else {
+            Write-Error "INCONCLUSIVE_ACL_PROBE: Administrator privileges are required to create a secondary account and verify named pipe ACL isolation. Run in an elevated PowerShell session or pass -AllowInconclusive for a non-enforcing local probe."
+            exit 1
+        }
     }
 
     Write-Host "Windows named pipe security verification complete."
