@@ -23,6 +23,7 @@ kesharon-ipc = { path = "../../../crates/kesharon-ipc" }
 kesharon-protocol.workspace = true
 serde.workspace = true
 tauri.workspace = true
+tauri-plugin-dialog = "2"
 tauri-plugin-shell.workspace = true
 uuid.workspace = true
 

@@ -164,6 +164,10 @@ pub fn connect_with_timeout(endpoint: &LocalEndpoint, timeout: Duration) -> io::
     Ok(stream)
 }
 
+pub fn set_stream_nonblocking(stream: &LocalStream, nonblocking: bool) -> io::Result<()> {
+    stream.set_nonblocking(nonblocking)
+}
+
 pub fn read_exact_with_timeout(
     stream: &Stream,
     mut buffer: &mut [u8],

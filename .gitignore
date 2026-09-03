@@ -31,6 +31,7 @@ tmp/
 artifacts/
 output/
 .playwright-cli/
+.agents/
 *.log
 *.db
 *.db-shm

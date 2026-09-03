@@ -7,6 +7,7 @@ import {
   ProtocolDecodeError,
   decodeCancellationResponse,
   decodeDaemonResponse,
+  decodeDaemonStreamUpdate,
   decodeHealthResponse,
   decodeProjectOpenResponse,
   decodeStreamMessage
@@ -197,5 +198,48 @@ describe("session protocol", () => {
         }
       })
     ).toThrow(ProtocolDecodeError);
+  });
+
+  it("decodes valid daemon stream updates", () => {
+    expect(
+      decodeDaemonStreamUpdate({
+        type: "message",
+        message: fixtures.snapshotMessage
+      })
+    ).toEqual({
+      type: "message",
+      message: fixtures.snapshotMessage
+    });
+
+    expect(
+      decodeDaemonStreamUpdate({
+        type: "reconnecting"
+      })
+    ).toEqual({
+      type: "reconnecting"
+    });
+
+    expect(
+      decodeDaemonStreamUpdate({
+        type: "unavailable",
+        message: "Daemon process terminated unexpectedly"
+      })
+    ).toEqual({
+      type: "unavailable",
+      message: "Daemon process terminated unexpectedly"
+    });
+  });
+
+  it("rejects invalid daemon stream updates", () => {
+    expect(() => decodeDaemonStreamUpdate(null)).toThrow(ProtocolDecodeError);
+    expect(() => decodeDaemonStreamUpdate({ type: "unknown" })).toThrow(
+      ProtocolDecodeError
+    );
+    expect(() =>
+      decodeDaemonStreamUpdate({ type: "message", message: { invalid: true } })
+    ).toThrow(ProtocolDecodeError);
+    expect(() => decodeDaemonStreamUpdate({ type: "unavailable" })).toThrow(
+      ProtocolDecodeError
+    );
   });
 });

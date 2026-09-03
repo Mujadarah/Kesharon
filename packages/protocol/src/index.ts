@@ -76,6 +76,32 @@ export class DaemonResponseError extends ProtocolDecodeError {
   }
 }
 
+export type CancellationOutcome =
+  | "accepted"
+  | "alreadyFinished"
+  | "notFound";
+
+export interface ProjectOpenResult {
+  requestId: string;
+  project: ProjectSnapshot;
+}
+
+export interface CancellationResult {
+  requestId: string;
+  targetRequestId: string;
+  outcome: CancellationOutcome;
+}
+
+export interface SubscriptionReadyResult {
+  requestId: string;
+  streamId: string;
+}
+
+export type DaemonStreamUpdate =
+  | { type: "message"; message: StreamMessage }
+  | { type: "reconnecting" }
+  | { type: "unavailable"; message: string };
+
 export type ResponsePayload =
   | {
       type: "health";
@@ -86,7 +112,7 @@ export type ResponsePayload =
   | {
       type: "cancellation";
       targetRequestId: string;
-      outcome: "accepted" | "alreadyFinished" | "notFound";
+      outcome: CancellationOutcome;
     }
   | { type: "subscriptionReady"; streamId: string };
 
@@ -140,10 +166,7 @@ export function decodeHealthResponse(value: unknown): HealthSnapshot {
   };
 }
 
-export function decodeProjectOpenResponse(value: unknown): {
-  requestId: string;
-  project: ProjectSnapshot;
-} {
+export function decodeProjectOpenResponse(value: unknown): ProjectOpenResult {
   const response = decodeDaemonResponse(value);
   const result = requireResult(response);
   if (result.type !== "projectOpened") {
@@ -152,11 +175,7 @@ export function decodeProjectOpenResponse(value: unknown): {
   return { requestId: response.requestId, project: result.project };
 }
 
-export function decodeCancellationResponse(value: unknown): {
-  requestId: string;
-  targetRequestId: string;
-  outcome: "accepted" | "alreadyFinished" | "notFound";
-} {
+export function decodeCancellationResponse(value: unknown): CancellationResult {
   const response = decodeDaemonResponse(value);
   const result = requireResult(response);
   if (result.type !== "cancellation") {
@@ -169,16 +188,34 @@ export function decodeCancellationResponse(value: unknown): {
   };
 }
 
-export function decodeSubscriptionReadyResponse(value: unknown): {
-  requestId: string;
-  streamId: string;
-} {
+export function decodeSubscriptionReadyResponse(
+  value: unknown
+): SubscriptionReadyResult {
   const response = decodeDaemonResponse(value);
   const result = requireResult(response);
   if (result.type !== "subscriptionReady") {
     throw new ProtocolDecodeError("Malformed daemon response");
   }
   return { requestId: response.requestId, streamId: result.streamId };
+}
+
+export function decodeDaemonStreamUpdate(value: unknown): DaemonStreamUpdate {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    throw new ProtocolDecodeError("Malformed daemon stream update");
+  }
+  if (value.type === "message") {
+    return {
+      type: "message",
+      message: decodeStreamMessage(value.message)
+    };
+  }
+  if (value.type === "reconnecting") {
+    return { type: "reconnecting" };
+  }
+  if (value.type === "unavailable" && typeof value.message === "string") {
+    return { type: "unavailable", message: value.message };
+  }
+  throw new ProtocolDecodeError("Malformed daemon stream update");
 }
 
 export function decodeStreamMessage(value: unknown): StreamMessage {

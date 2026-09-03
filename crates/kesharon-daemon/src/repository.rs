@@ -1,5 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(debug_assertions)]
+use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(debug_assertions)]
 use std::time::Duration;
 
 use kesharon_application::{

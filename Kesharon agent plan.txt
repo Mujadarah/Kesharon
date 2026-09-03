@@ -1,0 +1,420 @@
+# M1 Reliable Project Session Recovery and Completion Plan
+
+## Summary
+
+Complete the previously approved M1 reliability slice in `D:\Proiecte AI\Kesharon Agent\.worktrees\m0-m1-foundation`, preserving the hybrid architecture: short-lived authenticated command connections plus one persistent authoritative event stream.
+
+The repository architecture requires an unprivileged React UI, a narrow Tauri host, authenticated local IPC, and a Rust daemon that owns application state. The PDF reaches the same runtime split and emphasizes bounded concurrency and resource use. :codex-file-citation{path="D:\Proiecte AI\Kesharon Agent\Architecture Report for a Cross-Platform Open-Source Desktop Agent.pdf" purpose="source"}
+
+Current evidence:
+
+- `main` remains at `12a2e7e`; the implementation worktree is on `codex/m1-reliable-project-session` at `28462cd`.
+- The worktree has 14 modified and two untracked paths containing approximately 1,119 added lines. Preserve this work; never reset or recreate it.
+- All 45 Rust tests and all 18 pnpm-driven tests pass.
+- Required gates do not pass: Rust formatting fails, strict Clippy reports three errors, and TypeScript lint/build cannot resolve `node:fs` and `node:url`.
+- The production daemon still serves connections serially. A persistent subscription blocks the accept loop, so unit-level cancellation is not real IPC cancellation.
+- The roadmap still describes parts of the dirty implementation as unimplemented; it is documentation drift, not proof of completion.
+- No Git remote is configured, so hosted CI, PR, merge, and cross-platform evidence are presently unavailable.
+
+The partial protocol, application cancellation boundary, daemon session, and IPC ACL changes overlap and must be completed together. The Tauri/React flow depends on those interfaces. Windows cross-account ACL proof is independently implementable after the transport contract is frozen and may run in parallel with the UI work in a separate worktree. Documentation and milestone evidence come last.
+
+Selected architecture remains the previously approved hybrid design. Do not replace it with a multiplexed persistent command session or polling.
+
+## Public interfaces and locked behavior
+
+- Retain protocol version `1` because the extended contract is uncommitted, version `0.0.0`, and has no published consumer. Stop and introduce a versioned compatibility plan if an external consumer or artifact is discovered.
+- Keep:
+
+  - `ProjectSnapshot { id, displayName, canonicalRoot, trusted }`
+  - `OperationSnapshot { requestId, kind, status }`
+  - `WorkspaceSnapshot { streamId, lastSequence, project, activeOperations }`
+  - `operationStarted`, `projectOpened`, `operationCancelled`, and `operationFailed`
+  - `CancelRequest`, `SubscribeEvents`, and the three cancellation outcomes
+  - UUIDv7 daemon `streamId`, sequences starting at one, a 64-message buffer, an eight-connection cap, and a 256-entry completion ledger
+
+- Replace stringly typed error codes with a shared Rust enum and TypeScript union: `invalidRequest`, `notGitRepository`, `projectPathUnavailable`, `operationCancelled`, `requestInProgress`, `serverBusy`, and `internalError`.
+- Resolve the earlier contract ambiguity by keeping a missing cancellation target as the successful `notFound` cancellation outcome. Do not add an unused `requestNotFound` error.
+- Define idempotency precisely:
+
+  - Same key and identical mutation: replay the stored outcome under the retry’s current `requestId`, emitting no additional event.
+  - Same key with different method or arguments: return `invalidRequest`.
+  - Identical mutation still running: return `requestInProgress`.
+  - Eviction after 256 completed mutations permits later re-execution.
+
+- Allow exactly one authoritative daemon event subscriber. A new subscription atomically captures its snapshot and replaces the prior subscriber; buffer overflow disconnects it.
+- Add the frontend-facing bridge:
+
+  ```ts
+  interface DesktopBridge {
+    getHealth(): Promise<HealthSnapshot>;
+    chooseProjectDirectory(): Promise<string | null>;
+    openProject(path: string): {
+      requestId: string;
+      completion: Promise<ProjectSnapshot>;
+    };
+    cancelRequest(targetRequestId: string): Promise<CancellationOutcome>;
+    subscribeDaemonEvents(
+      onUpdate: (update: DaemonStreamUpdate) => void
+    ): Promise<void>;
+  }
+
+  type DaemonStreamUpdate =
+    | { type: "message"; message: StreamMessage }
+    | { type: "reconnecting" }
+    | { type: "unavailable"; message: string };
+  ```
+
+- The bridge generates request and idempotency UUIDs before invoking Tauri, making cancellation immediately addressable.
+- The TypeScript protocol package must decode generic responses, structured failures, project-open results, cancellation results, and stream messages rather than trusting `unknown`.
+
+## Phase 0 — Preserve and stabilize the interrupted work
+
+**Current behavior and root cause**
+
+The previous implementation stopped before formatting, lint, build, and integration verification. The missing Node type dependency causes the TypeScript failures; Rust failures are formatting and strict-Clippy issues.
+
+**Implementation sequence**
+
+1. Reconfirm worktree path, branch, HEAD, status, and Git directory. Stop if `main`, the foundation branch, or the dirty file set differs materially from the evidence above.
+2. Save a binary patch and untracked-file inventory outside the repository as recovery material; do not reset, stash, or overwrite the partial work.
+3. Pin `@types/node` `24.13.3` as an exact development dependency of `@kesharon/protocol`, update `pnpm-lock.yaml`, and retain Node 24 compatibility.
+4. Apply `rustfmt` and correct the existing Clippy findings without changing behavior.
+5. Run the focused Rust and TypeScript gates. Do not commit this partial state as completed; the first product commit follows Phase 1.
+
+**Verification**
+
+```powershell
+git status --short --branch
+git rev-parse HEAD
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets
+pnpm --filter @kesharon/protocol lint
+pnpm --filter @kesharon/protocol test
+pnpm --filter @kesharon/protocol build
+```
+
+On this host, use `C:\Users\rabia\.cargo\bin\cargo.exe` if Cargo remains absent from `PATH`.
+
+**Invariants, risks, and boundaries**
+
+- Preserve every existing modification and untracked fixture.
+- Do not touch the root checkout’s untracked architecture PDF.
+- Do not merge the foundation branch or move the repository.
+- Stop if dependency installation rewrites unrelated packages or the recovered diff cannot be explained.
+
+### Implementation routing
+
+- Task or phase: Preserve partial work and restore passing source gates
+- Recommended model and effort: Luna High
+- Confidence: high, 96%
+- Why this is the cheapest sufficient configuration: The failures are explicit, bounded, and strongly verified by deterministic commands.
+- Why the next-cheaper configuration may be insufficient: No cheaper configuration is offered in the allowed list.
+- Exact conditions requiring escalation: Unexpected branch drift, unexplained user changes, lockfile-wide churn, or tests failing beyond the four known gates.
+- Escalation model and effort: Terra High
+- Recommended independent-review model and effort: Luna High
+- Whether review must occur before merge or release: No separate merge gate; review the preserved diff before Phase 1.
+
+## Phase 1 — Complete the concurrent daemon session and IPC contract
+
+**Current behavior and diagnosis**
+
+The session core already stores project state, active operations, sequence numbers, subscribers, and completion entries. Its tests bypass production transport concurrency. In production, `main.rs` repeatedly invokes a method that accepts and fully serves one connection; a subscription then blocks in `Receiver::recv()`, preventing later command connections.
+
+Other gaps are untested completion-ledger eviction, idempotency-key collisions, subscriber overflow, subscriber replacement, failure terminal events, connection saturation, and actual process-level concurrent cancellation.
+
+**Repository evidence**
+
+- [daemon library](<D:/Proiecte AI/Kesharon Agent/.worktrees/m0-m1-foundation/crates/kesharon-daemon/src/lib.rs:116>) accepts and serves synchronously.
+- [daemon main loop](<D:/Proiecte AI/Kesharon Agent/.worktrees/m0-m1-foundation/crates/kesharon-daemon/src/main.rs:46>) does not spawn bounded handlers.
+- [session tests](<D:/Proiecte AI/Kesharon Agent/.worktrees/m0-m1-foundation/crates/kesharon-daemon/tests/session.rs:132>) invoke `DaemonSession` directly from separate test threads.
+- `LocalServer::accept_with_timeout` currently blocks in `accept()` before applying nonblocking mode, and `connect_with_timeout` performs the connection before applying its deadline.
+
+**Implementation sequence**
+
+1. Start with failing tests for:
+
+   - A real daemon process retaining a subscription while answering health and open requests.
+   - Cancellation arriving through a second IPC connection while open is blocked.
+   - An authenticated ninth concurrent connection receiving `serverBusy`.
+   - A second subscriber replacing and closing the first.
+   - Buffer overflow ending the subscriber and reconnect snapshot covering skipped events.
+   - Atomic subscription during an active operation.
+   - Exactly one terminal event on success, cancellation, and repository failure.
+   - Failed or cancelled replacement preserving the previous project.
+   - Idempotency replay, key/payload conflict, in-flight duplicate, request correlation, and 256-entry eviction.
+
+2. Complete shared JSON fixtures for every request, response, structured error, snapshot, and event. Add generic TypeScript response decoding and typed error codes.
+3. Store mutation fingerprints with in-flight and completed idempotency records. Store replayable outcomes independently from request correlation IDs.
+4. Replace the subscriber vector with one optional bounded sender. Snapshot capture and subscriber replacement must occur under the same session lock.
+5. Remove request-path panics. Mutex poisoning, impossible sequence creation, and unexpected adapter failures must return `internalError` or terminate only the affected authenticated connection without corrupting shared state.
+6. Split the growing daemon module by responsibility: session state, filesystem repository adapter, and bounded server runtime; keep `lib.rs` as the narrow public surface.
+7. Use `interprocess` listener nonblocking modes to implement a real accept deadline, and `ConnectOptions` with `ConnectWaitMode::Timeout` for bounded client connection attempts.
+8. Add a maximum of eight active connection permits. Each accepted connection is served on a worker thread; an authenticated excess request receives `serverBusy`.
+9. Authenticate before returning any structured response. Preserve the 8 MiB frame limit and per-frame read/write deadlines.
+10. Keep the filesystem adapter at the daemon boundary: canonicalize the selected directory, accept `.git` as a directory or linked-worktree file, reject other roots, and always create the project with `trusted=false`.
+11. Run focused gates, then the full Rust workspace. Commit as `fix: complete concurrent daemon session`.
+
+**Invariants and compatibility**
+
+- Domain remains standard-library-only; application remains infrastructure-free.
+- The previous project changes only after successful inspection and uncancelled construction.
+- One started and exactly one terminal event are emitted per accepted operation.
+- Sequence gaps are never inferred over; the consumer reconnects for a snapshot.
+- Authentication failure closes the connection without an error payload.
+- State and idempotency remain process-memory-only until M2.
+- No Tokio or additional async runtime should be introduced for the daemon.
+- Preserve `unsafe_code = "forbid"`.
+
+**Risks and stop conditions**
+
+- Stop if `interprocess` behaves differently on native Windows and Unix in a way that makes bounded accept/connect impossible with the pinned version.
+- Stop if timing-based tests are flaky; introduce deterministic barriers and test hooks rather than increasing sleeps.
+- Stop and re-plan if eight bounded threads cannot satisfy the measured idle-resource budget.
+- Non-UTF-8 Unix paths are not representable by the current JSON string contract; do not silently lossy-convert them if such support becomes a requirement.
+
+**Verification**
+
+```powershell
+cargo test -p kesharon-protocol --test wire_contract
+cargo test -p kesharon-application --test open_project
+cargo test -p kesharon-ipc --test round_trip
+cargo test -p kesharon-daemon --test session
+cargo test -p kesharon-daemon --test local_socket
+cargo test -p kesharon-daemon --test daemon_process
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+pnpm --filter @kesharon/protocol lint
+pnpm --filter @kesharon/protocol test
+pnpm --filter @kesharon/protocol build
+```
+
+Success requires real-process concurrent subscription/open/cancel behavior, bounded saturation, deterministic event ordering, and no leaked handler after subscriber replacement.
+
+### Implementation routing
+
+- Task or phase: Concurrent daemon, session consistency, idempotency, and cross-platform IPC
+- Recommended model and effort: Sol High
+- Confidence: high, 88%
+- Why this is the cheapest sufficient configuration: This phase combines shared-state concurrency, bounded resources, wire compatibility, cancellation, and difficult process-level verification.
+- Why the next-cheaper configuration may be insufficient: Terra Max may satisfy unit contracts while overlooking the production accept-loop block, abandoned subscriber lifetime, or retry correlation semantics.
+- Exact conditions requiring escalation: Deadlocks, native-only pipe/socket divergence, nondeterministic ordering, process leaks, or a required redesign of the transport.
+- Escalation model and effort: Sol XHigh
+- Recommended independent-review model and effort: Sol High
+- Whether review must occur before merge or release: Yes—review before Phase 2 and before any merge.
+
+## Phase 2 — Implement Tauri transport, reconnect recovery, and React project opening
+
+**Current behavior and objective**
+
+The host only exposes `daemon_health`; the React shell performs one health check and both repository controls are inert. There is no folder picker, project-open command, cancellation bridge, event Channel, reducer, reconnect state, or daemon-restart UX.
+
+**Implementation sequence**
+
+1. Add the exact Rust dependency `tauri-plugin-dialog = 2.7.2` and initialize it. Do not add the JavaScript dialog package or grant the webview dialog/filesystem/shell capabilities.
+2. Add an async dedicated Rust command using `DialogExt` and `blocking_pick_folder`; convert only a filesystem path to a string and treat picker closure as `None`. Tauri documents that the blocking picker belongs in an async/background command, not the main event thread. [Tauri dialog API](https://docs.rs/tauri-plugin-dialog/latest/tauri_plugin_dialog/struct.FileDialogBuilder.html)
+3. Generalize `DaemonClient` to send correlated open/cancel requests and to establish an authenticated subscription that validates:
+
+   - `SubscriptionReady.streamId`
+   - The initial snapshot’s matching stream
+   - Subsequent stream identity
+   - Exact `lastSequence + 1` event ordering
+
+4. Add host commands `choose_project_directory`, `daemon_open_project`, `daemon_cancel_request`, and `subscribe_daemon_events`. Blocking IPC runs off the Tauri event thread.
+5. Forward stream data through a typed Tauri `Channel<DaemonStreamUpdate>`. Maintain one subscription generation; a newer subscription invalidates the prior worker.
+6. On EOF, overflow-induced closure, stream mismatch, sequence gap, or daemon restart:
+
+   - Emit `reconnecting`.
+   - Re-read the current host `DaemonClient`, rather than retaining the old endpoint/token.
+   - Retry after 50 ms, doubling to a maximum of one second.
+   - Accept no events until a new authoritative snapshot arrives.
+   - Emit `unavailable` if the host’s one-restart budget is exhausted.
+
+7. Fix the health retry loop so a temporarily absent client during restart is retried instead of immediately returning `StateUnavailable`.
+8. Implement the bridge contract above. Validate all `unknown` Tauri responses through the protocol package and require response `requestId` correlation.
+9. Put workspace transition logic in a focused reducer module:
+
+   - Snapshot replaces state.
+   - Matching next event updates project/active operations.
+   - Gap or stream mismatch requests reconnection and applies nothing.
+   - Terminal failure/cancellation removes the active operation and preserves the prior project.
+   - A new empty stream after a previously open project shows “Daemon restarted; reopen repository.”
+
+10. Wire both “Add project” and “Open repository” controls. Picker cancellation changes nothing.
+11. During opening, show canonical progress and a Cancel control. On success, show canonical identity and enable local task text entry; keep actual “Prepare plan” execution disabled and labelled as a later milestone.
+12. Keep errors inline and retryable. Disable new mutations while reconnecting or unavailable.
+13. Add host and React tests before implementation, then commit as `feat: wire reliable project session to desktop`.
+
+**Invariants and boundaries**
+
+- The webview receives no generic filesystem, shell, or plugin-dialog permission.
+- Selecting and inspecting a repository does not mark it trusted.
+- The UI never infers missed events.
+- Browser-only Vite tests use a mock bridge and are not native daemon proof.
+- Do not add task planning, model providers, SQLite recovery, permissions, worktrees, or tools.
+- The dialog dependency’s contribution to release size must be measured later.
+
+**Stop conditions**
+
+- Stop if Channel lifetime across React Strict Mode or renderer reload leaves more than one daemon subscription after replacement.
+- Stop if Tauri requires widening capabilities beyond the dedicated command.
+- Stop if folder selection returns a non-file URI on a supported desktop platform.
+- Stop and re-plan if daemon restart cannot safely swap endpoint/token without exposing either to React.
+
+**Verification**
+
+```powershell
+cargo test -p kesharon-desktop-host --all-targets
+pnpm --filter @kesharon/protocol lint
+pnpm --filter @kesharon/protocol test
+pnpm --filter @kesharon/desktop lint
+pnpm --filter @kesharon/desktop test
+pnpm --filter @kesharon/desktop build
+```
+
+Acceptance scenarios include picker cancellation, successful linked-worktree opening, retryable invalid repository, cancellation, failed replacement preserving the old project, event gap, reconnect snapshot, daemon restart, and disabled controls while disconnected.
+
+### Implementation routing
+
+- Task or phase: Tauri host, Channel lifecycle, reconnect state, and React project flow
+- Recommended model and effort: Terra Max
+- Confidence: high, 87%
+- Why this is the cheapest sufficient configuration: The work spans Rust, Tauri lifecycle, TypeScript protocol validation, React state, and user-visible truth, but the interfaces are now explicit and testable.
+- Why the next-cheaper configuration may be insufficient: Terra High may miss Channel/restart races or allow UI state to diverge from daemon authority.
+- Exact conditions requiring escalation: Deadlock on native dialog, renderer-reload subscription leaks, inconsistent endpoint replacement, or platform-specific Channel behavior.
+- Escalation model and effort: Sol High
+- Recommended independent-review model and effort: Terra Max
+- Whether review must occur before merge or release: Yes—review before integration.
+
+## Phase 3 — Prove Windows same-user pipe isolation
+
+**Current behavior and diagnosis**
+
+The worktree passes `D:P(A;;GA;;;OW)(A;;GA;;;SY)` into the Windows listener and tests only that the constant has that value. It does not inspect effective behavior or prove denial to a second user.
+
+Microsoft documents that a default named-pipe descriptor grants read access to Everyone and Anonymous and that client access is checked against the pipe DACL. [Microsoft named-pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights) `OW` denotes the current Owner Rights SID, distinct from the inheritable Creator Owner SID. [Microsoft SID definitions](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
+
+**Implementation sequence**
+
+1. Retain the protected SDDL and safe `interprocess` descriptor API; do not introduce Rust `unsafe`.
+2. Add a Windows-only integration script that:
+
+   - Builds/launches an ephemeral daemon endpoint under the runner account.
+   - Proves the current account can connect and complete authenticated health.
+   - Creates a random local secondary account.
+   - Runs a bounded named-pipe connection probe as that account.
+   - Requires access denial before authentication.
+   - Records distinct results for denied, timed out, unexpectedly connected, and infrastructure failure.
+   - Deletes the scheduled task/process, result file, and local account in `finally`.
+
+3. Add a dedicated `windows-pipe-acl` CI job rather than hiding the proof inside ordinary unit tests.
+4. Keep the static SDDL test as a contract test, but do not treat it as security evidence.
+5. Correct documentation to describe `OW` as Owner Rights/current owner, not the Creator Owner placeholder.
+6. Commit as `test: verify Windows pipe isolation`.
+
+**Risks, non-goals, and stop conditions**
+
+- This phase proves local cross-account denial, not remote named-pipe policy, AppContainer isolation, or elevated automation.
+- Do not weaken the DACL to make CI easier.
+- Stop if GitHub-hosted runners prohibit account creation or alternate-user launch. Re-plan for a controlled Windows runner or a reviewed native test harness.
+- Stop if the effective owner differs from the launching desktop user or a secondary account connects successfully.
+- Treat cleanup failure as a failed security job.
+
+**Verification**
+
+```powershell
+cargo test -p kesharon-ipc --all-targets
+pwsh -NoProfile -File scripts/test-windows-pipe-acl.ps1
+```
+
+Success requires same-user authenticated success, secondary-user connection denial, bounded execution, and verified cleanup.
+
+### Implementation routing
+
+- Task or phase: Windows DACL behavior and hostile-user CI proof
+- Recommended model and effort: Sol High
+- Confidence: high, 90%
+- Why this is the cheapest sufficient configuration: The code change is small, but the proof is security-sensitive, platform-specific, and easy to falsely satisfy with a string assertion.
+- Why the next-cheaper configuration may be insufficient: Sol Medium or Terra Max may accept an ineffective or flaky impersonation setup as security evidence.
+- Exact conditions requiring escalation: Unexpected effective ACL entries, alternate-user connection success, runner-policy restrictions, or unreliable cleanup.
+- Escalation model and effort: Sol XHigh
+- Recommended independent-review model and effort: Sol XHigh
+- Whether review must occur before merge or release: Yes—mandatory before merge and release.
+
+## Phase 4 — Integration, documentation, and truthful evidence
+
+**Current behavior and objective**
+
+The roadmap and Windows evidence predate the dirty M1 work. No remote exists, so hosted Windows/macOS/Linux jobs have not run. Resource harnesses, installers, signing, updater, SBOM publication, and durable recovery remain open.
+
+**Implementation sequence**
+
+1. Merge Phase 2 and Phase 3 only after Phase 1’s interface review. If implemented in separate worktrees, resolve only expected manifest/lockfile overlap.
+2. Run every local gate from a cleanly formatted tree.
+3. Prepare the release sidecar and build the no-bundle desktop host.
+4. Compare SHA-256 of the release daemon with the target-suffixed binary staged for Tauri.
+5. Run a native Windows packaged-host smoke proving:
+
+   - One supervised daemon child.
+   - Health succeeds.
+   - Repository selection/open succeeds.
+   - The event stream stays active while commands continue.
+   - Cancellation and restart recovery follow the documented state model.
+
+6. Add ADR 0004 for the hybrid reliable-session design: one persistent event subscriber, short command connections, eight-connection cap, authoritative snapshots, bounded backoff, and volatile restart state.
+7. Update the product architecture, threat model, README, and master track. Move items from “not yet implemented” only when their full gates pass.
+8. Create a new dated M1 evidence record rather than rewriting the historical foundation evidence. Include exact commands, versions, test outcomes, binary hashes, ACL proof, failures, and evidence limits.
+9. Save the approved implementation plan under `docs/superpowers/plans/2026-08-04-m1-reliable-project-session.md`.
+10. Commit documentation/evidence separately as `docs: record M1 reliability evidence`.
+11. Stop for user authorization before configuring a remote, pushing, opening a PR, or merging.
+12. After publication approval, require hosted Rust/native-build matrices, CodeQL, and Windows ACL proof to pass. Native macOS/Linux evidence must come from hosted output, not inference.
+
+**Final local gates**
+
+```powershell
+git diff --check
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets
+pnpm check
+pnpm prepare:sidecar:release
+pnpm --filter @kesharon/desktop tauri build --no-bundle
+git status --short --branch
+```
+
+**Milestone truth and non-goals**
+
+- Functional M1 may be completed, but M0/M1 remain `in-progress` until hosted cross-platform and resource-budget evidence exists.
+- M2 SQLite/FTS5, credential vaults, and crash recovery are not part of this change.
+- M3 providers/planning, M4 permissions/worktrees/tools, TokenGraph, scheduling, installers, signing, updater, SBOM publication, and public release are excluded.
+- No database migration is required.
+- Do not merge into `main` without explicit approval: `main` does not yet contain the two foundation commits, and there is no configured remote.
+- If any external protocol consumer is found, stop and plan a version bump before committing wire changes.
+
+### Implementation routing
+
+- Task or phase: Cross-subsystem integration, packaged-runtime proof, and evidence updates
+- Recommended model and effort: Terra High
+- Confidence: high, 93%
+- Why this is the cheapest sufficient configuration: The implementation is complete by this point; the remaining difficulty is broad evidence correlation and honest milestone reporting.
+- Why the next-cheaper configuration may be insufficient: Luna Max may handle individual gates but miss contradictions between source tests, packaged runtime, roadmap status, and hosted evidence.
+- Exact conditions requiring escalation: Packaged sidecar hash mismatch, native runtime behavior differing from source tests, hosted platform failures, or unclear foundation-to-main integration.
+- Escalation model and effort: Terra Max
+- Recommended independent-review model and effort: Terra High
+- Whether review must occur before merge or release: Yes—final evidence review before either.
+
+## Execution sequence
+
+1. User approval is required before any implementation or tracked-file change.
+2. Phase 0 — preserve and stabilize the dirty worktree with Luna High.
+3. Phase 1 — complete daemon/session/IPC concurrency with Sol High; mandatory Sol High review.
+4. After Phase 1 is frozen:
+
+   - Phase 2 may run in an independent worktree with Terra Max.
+   - Phase 3 may run in parallel in another worktree with Sol High.
+   - If only one worktree is used, run Phase 2 then Phase 3 to avoid manifest and test overlap.
+
+5. Review Phase 2 with Terra Max and Phase 3 with Sol XHigh before integrating.
+6. Phase 4 — integrate and collect local/package evidence with Terra High.
+7. User approval is required again before adding a remote, pushing, opening a PR, or merging into `main`.
+8. Hosted CI and ACL jobs must pass before merge. Resource and cross-platform evidence must pass before changing M0 or M1 to `verified`.
