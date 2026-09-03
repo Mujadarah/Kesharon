@@ -116,6 +116,20 @@ try {
     $respPayload = New-Object byte[] $respLength
     Read-Exact -Stream $sameUserClient -Buffer $respPayload -Count $respLength
     $respJson = [System.Text.Encoding]::UTF8.GetString($respPayload)
+
+    $respObj = $null
+    try {
+        $respObj = $respJson | ConvertFrom-Json
+    } catch {
+        Write-Error "Health check response payload is not valid JSON: $respJson"
+        exit 1
+    }
+
+    if ($respObj.protocolVersion -ne 1 -or $respObj.requestId -ne "acl-probe-1" -or $respObj.result.type -ne "health" -or $respObj.result.status -ne "ready" -or $null -ne $respObj.error) {
+        Write-Error "Health check response payload failed contract validation: $respJson"
+        exit 1
+    }
+
     Write-Host "Same-user health check verified: $respJson"
     $sameUserClient.Dispose()
 
@@ -183,7 +197,9 @@ public class PipeAclTester {
     }
 }
 "@
-            Add-Type -TypeDefinition $logonCode -Language CSharp
+            if (-not ([System.Management.Automation.PSTypeName]'PipeAclTester').Type) {
+                Add-Type -TypeDefinition $logonCode -Language CSharp
+            }
             $probeResult = [PipeAclTester]::ProbePipe($secondaryUser, $secPassword, $endpoint)
             Write-Host "Secondary user connection probe result: $probeResult"
 
@@ -192,10 +208,17 @@ public class PipeAclTester {
             } elseif ($probeResult -eq "UNEXPECTED_SUCCESS") {
                 Write-Error "SECURITY VULNERABILITY: Secondary user was able to connect to named pipe!"
                 exit 1
+            } elseif ($probeResult.StartsWith("LOGON_FAILED") -or $probeResult.StartsWith("EXCEPTION")) {
+                if ($AllowInconclusive) {
+                    Write-Warning "Secondary user logon/probe failed ($probeResult). Skipping enforcement due to -AllowInconclusive."
+                } else {
+                    Write-Error "HOSTILE_PROBE_FAILED: Hostile-user probe failed ($probeResult). Secondary-user denial proof requires explicit ACCESS_DENIED."
+                    exit 1
+                }
             } elseif ($AllowInconclusive) {
-                Write-Warning "Secondary user logon/probe was inconclusive: $probeResult"
+                Write-Warning "Secondary user probe was inconclusive: $probeResult"
             } else {
-                Write-Error "INCONCLUSIVE_ACL_PROBE: Secondary user connection probe failed to prove denial: $probeResult"
+                Write-Error "HOSTILE_PROBE_FAILED: Secondary user connection probe failed to prove denial: $probeResult"
                 exit 1
             }
         }
