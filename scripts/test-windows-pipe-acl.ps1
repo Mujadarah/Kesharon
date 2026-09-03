@@ -135,8 +135,8 @@ try {
 
     # 2. Verify secondary account connection denial
     if ($isAdmin) {
-        $randSuffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
-        $secondaryUser = "kesharon_tst_$randSuffix"
+        $randSuffix = [guid]::NewGuid().ToString("N").Substring(0, 6)
+        $secondaryUser = "ksh_tst_$randSuffix"
         $credCharset = [char[]]"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
         $credChars = 1..12 | ForEach-Object { $credCharset[(Get-Random -Maximum $credCharset.Length)] }
         $secAuthToken = -join ($credChars + @('!', '9'))
