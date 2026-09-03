@@ -29,11 +29,18 @@ Implemented:
   authenticated health request, bounded reads, and process-level tests.
 - React workbench shell, narrow Tauri command surface, sidecar supervision,
   one-restart budget, tray lifecycle, and reproducible sidecar preparation.
+- Concurrent daemon session (8 connection permits, 64-message buffer, 256-entry
+  idempotency ledger, cancellation flag propagation).
+- Tauri command bridge (`choose_project_directory`, `daemon_open_project`,
+  `daemon_cancel_request`, `subscribe_daemon_events`) with background execution.
+- Resilient event streaming worker with exponential backoff (50ms–1s), sequence
+  gap detection, and authoritative reconnect snapshot synchronization.
+- React workspace lifecycle state, repository trust badges, in-flight opening
+  progress card with cancellation, and mutation-guarded task composer.
+- Windows named pipe same-user ACL isolation verification script and CI job.
 
 Not yet implemented:
 
-- Project-open dispatch through the daemon, event channels, reconnect
-  snapshots, cancellation, and complete Windows same-user pipe ACL hardening.
 - SQLite/FTS5, credential vaults, providers, permissions, Git worktrees, tools,
   TokenGraph, scheduling, updater/signing, SBOM publication, and release
   packaging.

@@ -16,6 +16,8 @@ use interprocess::local_socket::{
 
 pub type LocalStream = Stream;
 
+/// Protected DACL for Windows named pipes granting full access to Owner Rights (`OW`, S-1-3-4)
+/// and Local System (`SY`, S-1-5-18) while denying access to all other local user accounts.
 #[cfg(windows)]
 const WINDOWS_PIPE_SDDL: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
 
