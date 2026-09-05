@@ -458,6 +458,73 @@ textarea:disabled {
   padding-top: clamp(18px, 5vh, 64px);
 }
 
+.plan-intro-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--cobalt-soft);
+  color: var(--cobalt);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.active-task-info {
+  max-width: 680px;
+  margin-top: 20px;
+  padding: 12px 16px;
+  border: 1px solid #c8d4ee;
+  border-radius: 10px;
+  background: #f4f7fe;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.active-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.active-task-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.active-task-status {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #e6f7f5;
+  color: var(--teal);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.active-task-goal {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .plan-intro h1 {
   max-width: 520px;
   margin: 9px 0 12px;

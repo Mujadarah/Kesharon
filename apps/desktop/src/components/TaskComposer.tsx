@@ -1,24 +1,50 @@
+import type { TaskSnapshot } from "@kesharon/protocol";
+
 interface TaskComposerProps {
   taskGoal: string;
   hasProject: boolean;
   onGoalChange: (goal: string) => void;
+  activeTask?: TaskSnapshot | null;
 }
 
 export function TaskComposer({
   taskGoal,
   hasProject,
-  onGoalChange
+  onGoalChange,
+  activeTask
 }: TaskComposerProps) {
+  const modeLabel = `[Mode: ${activeTask?.executionMode?.toUpperCase() || "PLAN"}]`;
+
   return (
     <div className="plan-composer-wrapper">
       <div className="plan-intro">
-        <span className="eyebrow">New task</span>
+        <div className="plan-intro-meta">
+          <span className="eyebrow">New task</span>
+          <span className="mode-badge" data-testid="execution-mode-badge">
+            {modeLabel}
+          </span>
+        </div>
         <h1>Plan before execution</h1>
         <p>
           Describe the outcome. Kesharon will inspect the repository and
           prepare a bounded plan before requesting permission.
         </p>
       </div>
+
+      {activeTask && (
+        <div className="active-task-info" data-testid="active-task-info">
+          <div className="active-task-header">
+            <span className="active-task-label">Active Task</span>
+            <span
+              className="active-task-status"
+              data-testid="active-task-status"
+            >
+              {activeTask.state}
+            </span>
+          </div>
+          <p className="active-task-goal">{activeTask.goal}</p>
+        </div>
+      )}
 
       <label className="task-composer">
         <span className="sr-only">Task goal</span>

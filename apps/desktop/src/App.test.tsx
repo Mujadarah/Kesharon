@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DaemonResponseError,
@@ -6,7 +6,8 @@ import {
   type DaemonStreamUpdate,
   type HealthSnapshot,
   type ProjectOpenResult,
-  type StreamMessage
+  type StreamMessage,
+  type TaskSnapshot
 } from "@kesharon/protocol";
 import { App } from "./App";
 import type { DesktopBridge } from "./bridge";
@@ -330,4 +331,124 @@ describe("App Component", () => {
     expect(await screen.findByText("Daemon ready")).toBeInTheDocument();
     expect(screen.getByText("restored-project")).toBeInTheDocument();
   });
+
+  it("renders [Mode: PLAN] indicator badge and updates UI with active task details and resource ceilings", async () => {
+    const bridge = createMockBridge();
+    render(<App bridge={bridge} />);
+    expect(await screen.findByText("Daemon ready")).toBeInTheDocument();
+
+    const modeBadge = screen.getByTestId("execution-mode-badge");
+    expect(modeBadge).toBeInTheDocument();
+    expect(modeBadge).toHaveTextContent("[Mode: PLAN]");
+
+    // Default resource ceilings when no active task
+    expect(screen.getByText("0 / 2")).toBeInTheDocument();
+
+    const activeTask: TaskSnapshot = {
+      id: "task-test-42",
+      goal: "Implement token counter and telemetry",
+      state: "planning",
+      executionMode: "plan",
+      budget: {
+        maxMemoryBytes: 512 * 1024 * 1024,
+        maxDiskWriteBytes: 128 * 1024 * 1024,
+        maxConcurrentTools: 4,
+        maxPromptTokens: 40000,
+        maxCompletionTokens: 8000
+      }
+    };
+
+    act(() => {
+      bridge.emitMessage({
+        messageType: "snapshot",
+        snapshot: {
+          streamId: "s-task-1",
+          lastSequence: 1,
+          project: null,
+          activeOperations: [],
+          activeTask
+        }
+      });
+    });
+
+    // Active task goal and status
+    const activeTaskBanner = screen.getByTestId("active-task-info");
+    expect(activeTaskBanner).toBeInTheDocument();
+    expect(screen.getByTestId("active-task-status")).toHaveTextContent("planning");
+    expect(within(activeTaskBanner).getByText("Implement token counter and telemetry")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("Implement token counter and telemetry");
+
+    // ResourcePanel ceilings
+    expect(screen.getByText("512 MB")).toBeInTheDocument();
+    expect(screen.getByText("128 MB")).toBeInTheDocument();
+    expect(screen.getByText("0 / 4")).toBeInTheDocument();
+    expect(screen.getByText("40,000 prompt / 8,000 completion")).toBeInTheDocument();
+  });
+
+  it("updates mode badge to autonomous, omits tokens metric when undefined, and reverts on clear", async () => {
+    const bridge = createMockBridge();
+    render(<App bridge={bridge} />);
+    expect(await screen.findByText("Daemon ready")).toBeInTheDocument();
+
+    const modeBadge = screen.getByTestId("execution-mode-badge");
+    expect(modeBadge).toHaveTextContent("[Mode: PLAN]");
+
+    const autonomousTask: TaskSnapshot = {
+      id: "task-auto-1",
+      goal: "Run autonomous security scan",
+      state: "running",
+      executionMode: "autonomous",
+      budget: {
+        maxMemoryBytes: 256 * 1024 * 1024,
+        maxDiskWriteBytes: 32 * 1024 * 1024,
+        maxConcurrentTools: 2
+      }
+    };
+
+    act(() => {
+      bridge.emitMessage({
+        messageType: "snapshot",
+        snapshot: {
+          streamId: "s-auto",
+          lastSequence: 2,
+          project: null,
+          activeOperations: [],
+          activeTask: autonomousTask
+        }
+      });
+    });
+
+    // Badge shows AUTONOMOUS
+    expect(modeBadge).toHaveTextContent("[Mode: AUTONOMOUS]");
+
+    // Active task info shows running status
+    expect(screen.getByTestId("active-task-status")).toHaveTextContent("running");
+    expect(within(screen.getByTestId("active-task-info")).getByText("Run autonomous security scan")).toBeInTheDocument();
+
+    // Ceilings formatted properly
+    expect(screen.getByText("256 MB")).toBeInTheDocument();
+    expect(screen.getByText("32 MB")).toBeInTheDocument();
+    expect(screen.getByText("0 / 2")).toBeInTheDocument();
+    // Tokens metric should not be present
+    expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
+
+    // Clear active task via snapshot
+    act(() => {
+      bridge.emitMessage({
+        messageType: "snapshot",
+        snapshot: {
+          streamId: "s-auto",
+          lastSequence: 3,
+          project: null,
+          activeOperations: [],
+          activeTask: null
+        }
+      });
+    });
+
+    // Reverts to default mode badge and removes active task banner
+    expect(modeBadge).toHaveTextContent("[Mode: PLAN]");
+    expect(screen.queryByTestId("active-task-info")).not.toBeInTheDocument();
+  });
 });
+

@@ -5,6 +5,7 @@ import type {
   HealthSnapshot,
   ProjectSnapshot,
   StreamMessage,
+  TaskSnapshot,
   WorkspaceSnapshot
 } from "@kesharon/protocol";
 import type { DesktopBridge } from "./bridge";
@@ -27,6 +28,7 @@ export interface WorkspaceState {
   openingOperation: OpeningOperationState | null;
   openingError: string | null;
   taskGoal: string;
+  activeTask: TaskSnapshot | null;
   streamId: string | null;
   lastSequence: number;
 }
@@ -48,6 +50,7 @@ const initialState: WorkspaceState = {
   openingOperation: null,
   openingError: null,
   taskGoal: "",
+  activeTask: null,
   streamId: null,
   lastSequence: 0
 };
@@ -78,6 +81,8 @@ function workspaceReducer(
         };
       }
 
+      const activeTask = action.snapshot.activeTask ?? null;
+
       return {
         ...state,
         connection:
@@ -88,6 +93,8 @@ function workspaceReducer(
         project: action.snapshot.project,
         openingOperation,
         openingError: null,
+        activeTask,
+        taskGoal: activeTask ? activeTask.goal : state.taskGoal,
         streamId: action.snapshot.streamId,
         lastSequence: action.snapshot.lastSequence
       };

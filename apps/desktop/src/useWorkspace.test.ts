@@ -7,7 +7,8 @@ import {
   type HealthSnapshot,
   type ProjectOpenResult,
   type ProjectSnapshot,
-  type StreamMessage
+  type StreamMessage,
+  type TaskSnapshot
 } from "@kesharon/protocol";
 import { useWorkspace } from "./useWorkspace";
 import type { DesktopBridge } from "./bridge";
@@ -420,4 +421,60 @@ describe("useWorkspace", () => {
     });
     expect(result.current.state.connection.kind).toBe("unavailable");
   });
+
+  it("populates activeTask and updates taskGoal when snapshot contains activeTask", async () => {
+    const bridge = createMockBridge();
+    const { result } = renderHook(() => useWorkspace(bridge));
+
+    await waitFor(() => {
+      expect(result.current.state.connection.kind).toBe("ready");
+    });
+
+    const activeTask: TaskSnapshot = {
+      id: "task-101",
+      goal: "Refactor database connection pool",
+      state: "running",
+      executionMode: "autonomous",
+      budget: {
+        maxMemoryBytes: 512 * 1024 * 1024,
+        maxDiskWriteBytes: 64 * 1024 * 1024,
+        maxConcurrentTools: 4,
+        maxPromptTokens: 50000,
+        maxCompletionTokens: 10000
+      }
+    };
+
+    act(() => {
+      bridge.emitMessage({
+        messageType: "snapshot",
+        snapshot: {
+          streamId: "stream-beta",
+          lastSequence: 12,
+          project: null,
+          activeOperations: [],
+          activeTask
+        }
+      });
+    });
+
+    expect(result.current.state.activeTask).toEqual(activeTask);
+    expect(result.current.state.taskGoal).toBe("Refactor database connection pool");
+
+    act(() => {
+      bridge.emitMessage({
+        messageType: "snapshot",
+        snapshot: {
+          streamId: "stream-beta",
+          lastSequence: 13,
+          project: null,
+          activeOperations: [],
+          activeTask: null
+        }
+      });
+    });
+
+    expect(result.current.state.activeTask).toBeNull();
+    expect(result.current.state.taskGoal).toBe("Refactor database connection pool");
+  });
 });
+

@@ -45,12 +45,13 @@ export function App({ bridge }: { bridge: DesktopBridge }) {
             taskGoal={state.taskGoal}
             hasProject={state.project !== null}
             onGoalChange={setTaskGoal}
+            activeTask={state.activeTask}
           />
           <WorkflowRail />
         </section>
 
         <ReviewPanel />
-        <ResourcePanel />
+        <ResourcePanel activeTask={state.activeTask} />
       </main>
     </div>
   );
