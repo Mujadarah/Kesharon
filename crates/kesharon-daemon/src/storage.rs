@@ -27,6 +27,7 @@ impl SqliteStateRepository {
     fn initialize(conn: Connection) -> Result<Self, ApplicationError> {
         conn.execute_batch(
             "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA busy_timeout = 5000;
              CREATE TABLE IF NOT EXISTS projects (
@@ -37,7 +38,7 @@ impl SqliteStateRepository {
              );
              CREATE TABLE IF NOT EXISTS tasks (
                  id TEXT PRIMARY KEY,
-                 project_id TEXT NOT NULL,
+                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                  goal TEXT NOT NULL,
                  state TEXT NOT NULL,
                  execution_mode TEXT NOT NULL,
@@ -51,7 +52,7 @@ impl SqliteStateRepository {
              );
              CREATE TABLE IF NOT EXISTS task_checkpoints (
                  id TEXT PRIMARY KEY,
-                 task_id TEXT NOT NULL,
+                 task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
                  description TEXT NOT NULL,
                  git_ref TEXT NOT NULL,
                  timestamp_millis INTEGER NOT NULL
@@ -183,22 +184,49 @@ impl StateRepository for SqliteStateRepository {
             ExecutionMode::Act => "act",
         };
 
-        let last_project_id: Option<String> = conn
+        let existing_project_id: Option<String> = conn
             .query_row(
-                "SELECT value FROM session_metadata WHERE key = 'last_active_project_id'",
-                [],
+                "SELECT project_id FROM tasks WHERE id = ?1",
+                params![task.id().as_str()],
                 |row| row.get(0),
             )
             .ok();
 
-        let project_id = last_project_id.unwrap_or_else(|| "default-project".into());
+        let project_id = if let Some(pid) = existing_project_id {
+            pid
+        } else {
+            let last_project_id: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM session_metadata WHERE key = 'last_active_project_id'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            if let Some(pid) = last_project_id {
+                pid
+            } else {
+                conn.query_row(
+                    "SELECT id FROM projects ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| {
+                    ApplicationError::Storage(
+                        "Cannot save task without an associated project".into(),
+                    )
+                })?
+            }
+        };
+
+        let is_active = i64::from(task.is_active());
 
         conn.execute(
             "INSERT INTO tasks (
                  id, project_id, goal, state, execution_mode,
                  max_memory_bytes, max_disk_write_bytes, max_concurrent_tools,
                  max_prompt_tokens, max_completion_tokens, max_cost_micros, is_active
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                  goal = excluded.goal,
                  state = excluded.state,
@@ -231,6 +259,7 @@ impl StateRepository for SqliteStateRepository {
                     .max_cost_micros()
                     .map(i64_from_u64)
                     .transpose()?,
+                is_active,
             ],
         )
         .map_err(|err| ApplicationError::Storage(err.to_string()))?;

@@ -117,6 +117,91 @@ fn sqlite_storage_persists_tasks_checkpoints_and_active_task() {
 }
 
 #[test]
+fn sqlite_storage_clears_active_task_upon_terminal_state() {
+    let mut storage = SqliteStateRepository::in_memory().expect("in-memory sqlite opens");
+
+    let project = Project::new(
+        ProjectId::new("project-term-1").expect("valid id"),
+        "Terminal Project",
+        "/workspace/term",
+        true,
+    )
+    .expect("valid project");
+    storage.save_project(&project).expect("saved project");
+
+    let budget =
+        ResourceBudget::new(650 * 1024 * 1024, 128 * 1024 * 1024, 1).expect("valid budget");
+    let mut task = Task::new(
+        TaskId::new("task-term-1").expect("valid id"),
+        "Cancel me",
+        budget,
+    )
+    .expect("valid task");
+
+    task.start_planning().expect("planning started");
+    let plan = kesharon_domain::TaskPlan::new(vec![
+        kesharon_domain::TaskStep::new(
+            kesharon_domain::TaskStepId::new("step-1").expect("valid id"),
+            "First step",
+        )
+        .expect("valid step"),
+    ])
+    .expect("valid plan");
+    task.request_approval(plan).expect("approval requested");
+
+    storage.save_task(&task).expect("saved active task");
+    assert!(
+        storage
+            .load_active_task("project-term-1")
+            .expect("query succeeds")
+            .is_some()
+    );
+
+    // Reject transitions the task to Cancelled (terminal)
+    task.reject().expect("task rejected");
+    assert!(task.state().is_terminal());
+    assert!(!task.is_active());
+
+    storage.save_task(&task).expect("saved terminal task");
+
+    // Once terminal, load_active_task must return None
+    let active_opt = storage
+        .load_active_task("project-term-1")
+        .expect("query succeeds");
+    assert_eq!(active_opt, None);
+}
+
+#[test]
+fn sqlite_storage_enforces_foreign_keys() {
+    let mut storage = SqliteStateRepository::in_memory().expect("in-memory sqlite opens");
+
+    let chk = TaskCheckpoint::new(
+        "chk-orphan-1",
+        "Orphan checkpoint",
+        "refs/heads/orphan",
+        1_700_000_000_000,
+    )
+    .expect("valid checkpoint");
+
+    // Saving checkpoint for nonexistent task must fail due to FOREIGN KEY constraint
+    let result = storage.save_checkpoint("nonexistent-task", &chk);
+    assert!(result.is_err());
+
+    let budget =
+        ResourceBudget::new(650 * 1024 * 1024, 128 * 1024 * 1024, 1).expect("valid budget");
+    let task = Task::new(
+        TaskId::new("task-no-proj").expect("valid id"),
+        "Orphan task",
+        budget,
+    )
+    .expect("valid task");
+
+    // Saving a task without any existing project must fail
+    let task_result = storage.save_task(&task);
+    assert!(task_result.is_err());
+}
+
+#[test]
 fn sqlite_storage_records_and_retrieves_idempotency_entries() {
     let mut storage = SqliteStateRepository::in_memory().expect("in-memory sqlite opens");
 
@@ -154,6 +239,14 @@ fn sqlite_storage_file_backed_uses_wal_and_persists_across_handles() {
 
     {
         let mut storage = SqliteStateRepository::open(&db_path).expect("opens file db");
+
+        // Verify WAL journal mode is active
+        let conn = rusqlite::Connection::open(&db_path).expect("verify conn");
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("query journal_mode");
+        assert_eq!(journal_mode.to_lowercase(), "wal");
+
         let project = Project::new(
             ProjectId::new("file-proj-1").expect("valid id"),
             "Persistent Project",
