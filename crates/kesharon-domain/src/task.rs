@@ -52,12 +52,65 @@ impl TaskPlan {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionMode {
+    Plan,
+    Act,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskCheckpoint {
+    id: String,
+    description: String,
+    git_ref: String,
+    timestamp_millis: u64,
+}
+
+impl TaskCheckpoint {
+    pub fn new(
+        id: impl Into<String>,
+        description: impl Into<String>,
+        git_ref: impl Into<String>,
+        timestamp_millis: u64,
+    ) -> Result<Self, TaskError> {
+        let id = id.into();
+        let description = description.into();
+        let git_ref = git_ref.into();
+        if id.trim().is_empty() || description.trim().is_empty() || git_ref.trim().is_empty() {
+            return Err(TaskError::EmptyIdentifier);
+        }
+        Ok(Self {
+            id,
+            description,
+            git_ref,
+            timestamp_millis,
+        })
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn git_ref(&self) -> &str {
+        &self.git_ref
+    }
+
+    pub const fn timestamp_millis(&self) -> u64 {
+        self.timestamp_millis
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Task {
     id: TaskId,
     goal: String,
     budget: ResourceBudget,
     state: TaskState,
+    execution_mode: ExecutionMode,
     plan: Option<TaskPlan>,
 }
 
@@ -77,8 +130,29 @@ impl Task {
             goal,
             budget,
             state: TaskState::Draft,
+            execution_mode: ExecutionMode::Plan,
             plan: None,
         })
+    }
+
+    pub const fn id(&self) -> &TaskId {
+        &self.id
+    }
+
+    pub fn goal(&self) -> &str {
+        &self.goal
+    }
+
+    pub const fn budget(&self) -> &ResourceBudget {
+        &self.budget
+    }
+
+    pub const fn execution_mode(&self) -> ExecutionMode {
+        self.execution_mode
+    }
+
+    pub fn set_execution_mode(&mut self, mode: ExecutionMode) {
+        self.execution_mode = mode;
     }
 
     pub const fn state(&self) -> TaskState {

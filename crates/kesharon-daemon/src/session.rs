@@ -457,6 +457,11 @@ fn classify_application_error(error: &ApplicationError) -> (ErrorCode, &'static 
         ApplicationError::InvalidProject(_) => {
             (ErrorCode::InvalidRequest, "Project identity is invalid")
         }
+        ApplicationError::Storage(_) => (ErrorCode::InternalError, "Storage error encountered"),
+        ApplicationError::Vault(_) => (
+            ErrorCode::InternalError,
+            "Credential vault error encountered",
+        ),
         ApplicationError::Cancelled => (
             ErrorCode::OperationCancelled,
             "Project opening was cancelled",
