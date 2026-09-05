@@ -95,13 +95,8 @@ impl CredentialVault for InMemoryVault {
 }
 
 #[test]
-fn session_recovery_restores_last_active_project_and_vault() {
+fn session_recovery_restores_last_active_project() {
     let mut repo = InMemoryStateRepo::default();
-    let mut vault = InMemoryVault::default();
-
-    vault
-        .set_secret("openai_api_key", "sk-test-secret")
-        .expect("vault set");
 
     let project = Project::new(
         ProjectId::new("proj-1").expect("valid id"),
@@ -119,10 +114,23 @@ fn session_recovery_restores_last_active_project_and_vault() {
         recovered.project().map(Project::display_name),
         Some("Kesharon")
     );
+}
+
+#[test]
+fn credential_vault_stores_retrieves_and_deletes_secrets() {
+    let mut vault = InMemoryVault::default();
+
+    vault
+        .set_secret("openai_api_key", "sk-test-secret")
+        .expect("vault set");
+
     assert_eq!(
         vault.get_secret("openai_api_key").expect("vault get"),
         Some("sk-test-secret".to_string())
     );
+
+    assert!(vault.delete_secret("openai_api_key").expect("vault delete"));
+    assert_eq!(vault.get_secret("openai_api_key").expect("vault get"), None);
 }
 
 #[test]
