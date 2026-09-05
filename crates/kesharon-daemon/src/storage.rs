@@ -279,74 +279,12 @@ impl StateRepository for SqliteStateRepository {
                         max_concurrent_tools, max_prompt_tokens, max_completion_tokens, max_cost_micros
                  FROM tasks WHERE id = ?1",
             )
-            .map_err(|err| ApplicationError::Storage(err.to_string()))?;
+            .map_err(to_storage_err)?;
 
-        let mut rows = stmt
-            .query(params![id])
-            .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-
-        if let Some(row) = rows
-            .next()
-            .map_err(|err| ApplicationError::Storage(err.to_string()))?
-        {
-            let id_str: String = row
-                .get(0)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let goal: String = row
-                .get(1)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let mode_str: String = row
-                .get(2)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let max_mem: i64 = row
-                .get(3)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let max_disk: i64 = row
-                .get(4)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let max_tools: i64 = row
-                .get(5)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let max_prompt: Option<i64> = row
-                .get(6)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let max_completion: Option<i64> = row
-                .get(7)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            let max_cost: Option<i64> = row
-                .get(8)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-
-            let mem = u64_from_i64(max_mem)?;
-            let disk = u64_from_i64(max_disk)?;
-            let tools = u16_from_i64(max_tools)?;
-            let mut budget = ResourceBudget::new(mem, disk, tools)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-
-            if let (Some(p), Some(c), Some(cost)) = (max_prompt, max_completion, max_cost) {
-                let p_u64 = u64_from_i64(p)?;
-                let c_u64 = u64_from_i64(c)?;
-                let cost_u64 = u64_from_i64(cost)?;
-                budget = budget
-                    .with_token_limits(p_u64, c_u64, cost_u64)
-                    .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-            }
-
-            let task_id =
-                TaskId::new(id_str).map_err(|err| ApplicationError::Storage(err.to_string()))?;
-
-            let mut task = Task::new(task_id, goal, budget)
-                .map_err(|err| ApplicationError::Storage(err.to_string()))?;
-
-            if mode_str == "act" {
-                task.set_execution_mode(ExecutionMode::Act);
-            } else {
-                task.set_execution_mode(ExecutionMode::Plan);
-            }
-
-            Ok(Some(task))
-        } else {
-            Ok(None)
+        let mut rows = stmt.query(params![id]).map_err(to_storage_err)?;
+        match rows.next().map_err(to_storage_err)? {
+            Some(row) => parse_task_row(row).map(Some),
+            None => Ok(None),
         }
     }
 
@@ -507,4 +445,65 @@ fn u64_from_i64(val: i64) -> Result<u64, ApplicationError> {
 
 fn u16_from_i64(val: i64) -> Result<u16, ApplicationError> {
     u16::try_from(val).map_err(|err| ApplicationError::Storage(err.to_string()))
+}
+
+fn to_storage_err(err: impl std::fmt::Display) -> ApplicationError {
+    ApplicationError::Storage(err.to_string())
+}
+
+struct RawTaskBudget {
+    max_mem: i64,
+    max_disk: i64,
+    max_tools: i64,
+    max_prompt: Option<i64>,
+    max_completion: Option<i64>,
+    max_cost: Option<i64>,
+}
+
+impl RawTaskBudget {
+    fn into_resource_budget(self) -> Result<ResourceBudget, ApplicationError> {
+        let mem = u64_from_i64(self.max_mem)?;
+        let disk = u64_from_i64(self.max_disk)?;
+        let tools = u16_from_i64(self.max_tools)?;
+        let mut budget = ResourceBudget::new(mem, disk, tools).map_err(to_storage_err)?;
+
+        if let (Some(p), Some(c), Some(cost)) =
+            (self.max_prompt, self.max_completion, self.max_cost)
+        {
+            let p_u64 = u64_from_i64(p)?;
+            let c_u64 = u64_from_i64(c)?;
+            let cost_u64 = u64_from_i64(cost)?;
+            budget = budget
+                .with_token_limits(p_u64, c_u64, cost_u64)
+                .map_err(to_storage_err)?;
+        }
+
+        Ok(budget)
+    }
+}
+
+fn parse_task_row(row: &rusqlite::Row<'_>) -> Result<Task, ApplicationError> {
+    let id_str: String = row.get(0).map_err(to_storage_err)?;
+    let goal: String = row.get(1).map_err(to_storage_err)?;
+    let mode_str: String = row.get(2).map_err(to_storage_err)?;
+    let raw_budget = RawTaskBudget {
+        max_mem: row.get(3).map_err(to_storage_err)?,
+        max_disk: row.get(4).map_err(to_storage_err)?,
+        max_tools: row.get(5).map_err(to_storage_err)?,
+        max_prompt: row.get(6).map_err(to_storage_err)?,
+        max_completion: row.get(7).map_err(to_storage_err)?,
+        max_cost: row.get(8).map_err(to_storage_err)?,
+    };
+
+    let budget = raw_budget.into_resource_budget()?;
+    let task_id = TaskId::new(id_str).map_err(to_storage_err)?;
+    let mut task = Task::new(task_id, goal, budget).map_err(to_storage_err)?;
+
+    if mode_str == "act" {
+        task.set_execution_mode(ExecutionMode::Act);
+    } else {
+        task.set_execution_mode(ExecutionMode::Plan);
+    }
+
+    Ok(task)
 }

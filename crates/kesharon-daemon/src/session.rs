@@ -298,14 +298,18 @@ impl DaemonSession {
         let response = match result {
             Ok(project) => {
                 if let Some(repo_mutex) = &self.state_repository {
-                    let Ok(mut repo) = repo_mutex.lock() else {
-                        return internal_error(request.request_id());
-                    };
-                    if let Err(storage_err) = repo.save_project(&project) {
-                        return self.complete_failure(request, &mut state, &storage_err);
+                    match repo_mutex.lock() {
+                        Ok(mut repo) => match repo.save_project(&project) {
+                            Ok(()) => self.complete_success(request, &mut state, &project),
+                            Err(storage_err) => {
+                                self.complete_failure(request, &mut state, &storage_err)
+                            }
+                        },
+                        Err(_) => internal_error(request.request_id()),
                     }
+                } else {
+                    self.complete_success(request, &mut state, &project)
                 }
-                self.complete_success(request, &mut state, &project)
             }
             Err(ApplicationError::Cancelled) => self.complete_cancellation(request, &mut state),
             Err(error) => self.complete_failure(request, &mut state, &error),

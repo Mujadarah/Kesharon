@@ -208,4 +208,22 @@ fn daemon_session_fails_open_project_when_storage_save_fails() {
     let err = response.error().expect("expected error response");
     assert_eq!(err.code(), ErrorCode::InternalError);
     assert_eq!(err.message(), "Storage error encountered");
+
+    // Retrying with the same idempotency key must replay the cached failure response
+    let retry_req = ClientRequest::new(
+        "req-fail-open-retry",
+        RequestMethod::OpenProject {
+            path: "D:\\repos\\failing-project".into(),
+        },
+        Some("idem-fail-key".into()),
+    )
+    .expect("valid request");
+
+    let retry_response = session.dispatch(&retry_req);
+    let retry_err = retry_response
+        .error()
+        .expect("expected cached error response");
+    assert_eq!(retry_err.code(), ErrorCode::InternalError);
+    assert_eq!(retry_err.message(), "Storage error encountered");
+    assert_eq!(retry_response.request_id(), "req-fail-open-retry");
 }
