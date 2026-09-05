@@ -116,6 +116,24 @@ fn daemon_session_recovers_last_active_project_and_task_on_startup() {
     assert_eq!(recovered_project.canonical_root, "D:\\repos\\persisted");
     assert!(recovered_project.trusted);
 
+    let recovered_task_snapshot = subscription
+        .snapshot
+        .active_task()
+        .expect("active task is present in snapshot");
+    assert_eq!(recovered_task_snapshot.id, "task-active-99");
+    assert_eq!(recovered_task_snapshot.goal, "Active task to recover");
+    assert_eq!(recovered_task_snapshot.state, "draft");
+    assert_eq!(recovered_task_snapshot.execution_mode, "plan");
+    assert_eq!(
+        recovered_task_snapshot.budget.max_memory_bytes,
+        650 * 1024 * 1024
+    );
+    assert_eq!(
+        recovered_task_snapshot.budget.max_disk_write_bytes,
+        128 * 1024 * 1024
+    );
+    assert_eq!(recovered_task_snapshot.budget.max_concurrent_tools, 1);
+
     let recovered_task = session
         .active_task()
         .expect("active_task query succeeds")
@@ -173,6 +191,7 @@ fn daemon_session_persists_opened_project_to_storage_and_recovers_in_subsequent_
         .expect("session 2 created");
 
         let subscription = session.subscribe().expect("subscription succeeds");
+        assert!(subscription.snapshot.active_task().is_none());
         let project = subscription.snapshot.project().expect("project recovered");
         assert_eq!(project.id, "project-fixed-1");
         assert_eq!(project.display_name, "test-recovered-project");

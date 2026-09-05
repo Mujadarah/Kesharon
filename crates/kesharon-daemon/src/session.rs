@@ -7,10 +7,12 @@ use kesharon_application::{
     ApplicationError, CancellationSignal, IdGenerator, OpenProject, OpenProjectCommand,
     RepositoryService, SessionRecovery, StateRepository,
 };
+use kesharon_domain::{ExecutionMode, TaskState};
 use kesharon_protocol::{
     CancellationOutcome, ClientRequest, DaemonEvent, DaemonEventPayload, ErrorCode, HealthStatus,
     OperationKind, OperationSnapshot, OperationStatus, PROTOCOL_VERSION, ProjectSnapshot,
-    RequestMethod, ResponsePayload, ServerResponse, StreamMessage, WorkspaceSnapshot,
+    RequestMethod, ResourceBudgetSnapshot, ResponsePayload, ServerResponse, StreamMessage,
+    TaskSnapshot, WorkspaceSnapshot,
 };
 
 use crate::repository::{UuidIds, production_repository};
@@ -462,12 +464,13 @@ impl DaemonSession {
                 status: OperationStatus::Running,
             })
             .collect();
+        let active_task = state.active_task.as_ref().map(task_to_snapshot);
         WorkspaceSnapshot::new(
             self.stream_id.clone(),
             state.sequence,
             state.project.clone(),
             active_operations,
-            None,
+            active_task,
         )
     }
 
@@ -567,4 +570,42 @@ fn internal_error(request_id: &str) -> ServerResponse {
         ErrorCode::InternalError,
         "Daemon session state is unavailable",
     )
+}
+
+fn task_to_snapshot(task: &kesharon_domain::Task) -> TaskSnapshot {
+    let state = match task.state() {
+        TaskState::Draft => "draft",
+        TaskState::Planning => "planning",
+        TaskState::AwaitingApproval => "awaiting_approval",
+        TaskState::Executing => "executing",
+        TaskState::Paused => "paused",
+        TaskState::AwaitingReview => "awaiting_review",
+        TaskState::Completed => "completed",
+        TaskState::Failed => "failed",
+        TaskState::Cancelled => "cancelled",
+    }
+    .to_owned();
+
+    let execution_mode = match task.execution_mode() {
+        ExecutionMode::Plan => "plan",
+        ExecutionMode::Act => "act",
+    }
+    .to_owned();
+
+    let budget = ResourceBudgetSnapshot {
+        max_memory_bytes: task.budget().max_memory_bytes(),
+        max_disk_write_bytes: task.budget().max_disk_write_bytes(),
+        max_concurrent_tools: task.budget().max_concurrent_tools(),
+        max_prompt_tokens: task.budget().max_prompt_tokens(),
+        max_completion_tokens: task.budget().max_completion_tokens(),
+        max_cost_micros: task.budget().max_cost_micros(),
+    };
+
+    TaskSnapshot {
+        id: task.id().as_str().to_owned(),
+        goal: task.goal().to_owned(),
+        state,
+        execution_mode,
+        budget,
+    }
 }
