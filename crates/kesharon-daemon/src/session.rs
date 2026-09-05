@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use kesharon_application::{
     ApplicationError, CancellationSignal, IdGenerator, OpenProject, OpenProjectCommand,
-    RepositoryService,
+    RepositoryService, SessionRecovery, StateRepository,
 };
 use kesharon_protocol::{
     CancellationOutcome, ClientRequest, DaemonEvent, DaemonEventPayload, ErrorCode, HealthStatus,
@@ -14,6 +14,7 @@ use kesharon_protocol::{
 };
 
 use crate::repository::{UuidIds, production_repository};
+use crate::storage::SqliteStateRepository;
 
 const IDEMPOTENCY_LIMIT: usize = 256;
 const SUBSCRIBER_CAPACITY: usize = 64;
@@ -90,10 +91,13 @@ pub enum SessionError {
     SequenceExhausted,
 }
 
+pub type SharedStateRepository = Arc<Mutex<Box<dyn StateRepository + Send + Sync>>>;
+
 pub struct DaemonSession {
     stream_id: String,
     repository: Arc<dyn RepositoryService + Send + Sync>,
     ids: Arc<dyn IdGenerator + Send + Sync>,
+    state_repository: Option<SharedStateRepository>,
     state: Mutex<SessionState>,
 }
 
@@ -103,19 +107,67 @@ impl DaemonSession {
         repository: Arc<dyn RepositoryService + Send + Sync>,
         ids: Arc<dyn IdGenerator + Send + Sync>,
     ) -> Self {
+        Self::with_storage(stream_id, repository, ids, None)
+    }
+
+    pub fn with_storage(
+        stream_id: impl Into<String>,
+        repository: Arc<dyn RepositoryService + Send + Sync>,
+        ids: Arc<dyn IdGenerator + Send + Sync>,
+        state_repository: Option<SharedStateRepository>,
+    ) -> Self {
+        let initial_project = state_repository.as_ref().and_then(|repo_mutex| {
+            repo_mutex.lock().ok().and_then(|repo| {
+                SessionRecovery::new(repo.as_ref())
+                    .execute()
+                    .ok()
+                    .and_then(|recovered| {
+                        recovered.project().map(|project| ProjectSnapshot {
+                            id: project.id().as_str().to_owned(),
+                            display_name: project.display_name().to_owned(),
+                            canonical_root: project.canonical_root().to_owned(),
+                            trusted: project.is_trusted(),
+                        })
+                    })
+            })
+        });
+
+        let mut initial_state = SessionState::new();
+        initial_state.project = initial_project;
+
         Self {
             stream_id: stream_id.into(),
             repository,
             ids,
-            state: Mutex::new(SessionState::new()),
+            state_repository,
+            state: Mutex::new(initial_state),
         }
     }
 
     pub(crate) fn production() -> Self {
-        Self::new(
+        let storage: Option<SharedStateRepository> =
+            if let Some(path) = std::env::var_os("KESHARON_STATE_DB") {
+                SqliteStateRepository::open(path)
+                    .map(|repo| {
+                        Arc::new(Mutex::new(
+                            Box::new(repo) as Box<dyn StateRepository + Send + Sync>
+                        ))
+                    })
+                    .ok()
+            } else {
+                SqliteStateRepository::in_memory()
+                    .map(|repo| {
+                        Arc::new(Mutex::new(
+                            Box::new(repo) as Box<dyn StateRepository + Send + Sync>
+                        ))
+                    })
+                    .ok()
+            };
+        Self::with_storage(
             uuid::Uuid::now_v7().to_string(),
             production_repository(),
             Arc::new(UuidIds),
+            storage,
         )
     }
 
@@ -227,7 +279,14 @@ impl DaemonSession {
         state.active.remove(request.request_id());
         state.in_flight.remove(key);
         let response = match result {
-            Ok(project) => self.complete_success(request, &mut state, &project),
+            Ok(project) => {
+                if let Some(repo_mutex) = &self.state_repository
+                    && let Ok(mut repo) = repo_mutex.lock()
+                {
+                    let _ = repo.save_project(&project);
+                }
+                self.complete_success(request, &mut state, &project)
+            }
             Err(ApplicationError::Cancelled) => self.complete_cancellation(request, &mut state),
             Err(error) => self.complete_failure(request, &mut state, &error),
         };

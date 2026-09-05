@@ -23,6 +23,7 @@ pub trait StateRepository {
     fn load_last_active_project(&self) -> Result<Option<Project>, ApplicationError>;
     fn save_task(&mut self, task: &Task) -> Result<(), ApplicationError>;
     fn load_task(&self, id: &str) -> Result<Option<Task>, ApplicationError>;
+    fn load_active_task(&self, project_id: &str) -> Result<Option<Task>, ApplicationError>;
     fn save_checkpoint(
         &mut self,
         task_id: &str,
@@ -125,7 +126,11 @@ impl<'a, S: StateRepository + ?Sized> SessionRecovery<'a, S> {
 
     pub fn execute(&self) -> Result<RecoveredSession, ApplicationError> {
         let project = self.state_repository.load_last_active_project()?;
-        Ok(RecoveredSession::new(project, None))
+        let active_task = match &project {
+            Some(p) => self.state_repository.load_active_task(p.id().as_str())?,
+            None => None,
+        };
+        Ok(RecoveredSession::new(project, active_task))
     }
 }
 
