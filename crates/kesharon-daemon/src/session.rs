@@ -609,3 +609,176 @@ fn task_to_snapshot(task: &kesharon_domain::Task) -> TaskSnapshot {
         budget,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kesharon_domain::{ResourceBudget, Task, TaskId, TaskPlan, TaskStep, TaskStepId};
+
+    fn test_budget() -> ResourceBudget {
+        ResourceBudget::new(256 * 1024 * 1024, 64 * 1024 * 1024, 2)
+            .expect("valid test budget")
+    }
+
+    fn sample_plan() -> TaskPlan {
+        TaskPlan::new(vec![TaskStep::new(
+            TaskStepId::new("step-1").expect("valid step id"),
+            "Step 1 description",
+        )
+        .expect("valid step")])
+        .expect("valid plan")
+    }
+
+    fn new_test_task() -> Task {
+        Task::new(
+            TaskId::new("task-test-1").expect("valid task id"),
+            "Test task goal",
+            test_budget(),
+        )
+        .expect("valid task")
+    }
+
+    #[test]
+    fn task_to_snapshot_maps_all_nine_task_states() {
+        // 1. Draft
+        let task_draft = new_test_task();
+        assert_eq!(task_draft.state(), TaskState::Draft);
+        let snap = task_to_snapshot(&task_draft);
+        assert_eq!(snap.id, "task-test-1");
+        assert_eq!(snap.goal, "Test task goal");
+        assert_eq!(snap.state, "draft");
+
+        // 2. Planning
+        let mut task_planning = new_test_task();
+        task_planning.start_planning().expect("start_planning");
+        assert_eq!(task_planning.state(), TaskState::Planning);
+        let snap = task_to_snapshot(&task_planning);
+        assert_eq!(snap.state, "planning");
+
+        // 3. AwaitingApproval
+        let mut task_approval = new_test_task();
+        task_approval.start_planning().expect("start_planning");
+        task_approval
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        assert_eq!(task_approval.state(), TaskState::AwaitingApproval);
+        let snap = task_to_snapshot(&task_approval);
+        assert_eq!(snap.state, "awaiting_approval");
+
+        // 4. Executing
+        let mut task_executing = new_test_task();
+        task_executing.start_planning().expect("start_planning");
+        task_executing
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        task_executing.approve().expect("approve");
+        assert_eq!(task_executing.state(), TaskState::Executing);
+        let snap = task_to_snapshot(&task_executing);
+        assert_eq!(snap.state, "executing");
+
+        // 5. Paused
+        let mut task_paused = new_test_task();
+        task_paused.start_planning().expect("start_planning");
+        task_paused
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        task_paused.approve().expect("approve");
+        task_paused.pause().expect("pause");
+        assert_eq!(task_paused.state(), TaskState::Paused);
+        let snap = task_to_snapshot(&task_paused);
+        assert_eq!(snap.state, "paused");
+
+        // 6. AwaitingReview
+        let mut task_review = new_test_task();
+        task_review.start_planning().expect("start_planning");
+        task_review
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        task_review.approve().expect("approve");
+        task_review.submit_for_review().expect("submit_for_review");
+        assert_eq!(task_review.state(), TaskState::AwaitingReview);
+        let snap = task_to_snapshot(&task_review);
+        assert_eq!(snap.state, "awaiting_review");
+
+        // 7. Completed
+        let mut task_completed = new_test_task();
+        task_completed.start_planning().expect("start_planning");
+        task_completed
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        task_completed.approve().expect("approve");
+        task_completed.submit_for_review().expect("submit_for_review");
+        task_completed.accept().expect("accept");
+        assert_eq!(task_completed.state(), TaskState::Completed);
+        let snap = task_to_snapshot(&task_completed);
+        assert_eq!(snap.state, "completed");
+
+        // 8. Cancelled
+        let mut task_cancelled = new_test_task();
+        task_cancelled.start_planning().expect("start_planning");
+        task_cancelled
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        task_cancelled.reject().expect("reject");
+        assert_eq!(task_cancelled.state(), TaskState::Cancelled);
+        let snap = task_to_snapshot(&task_cancelled);
+        assert_eq!(snap.state, "cancelled");
+
+        // 9. Failed
+        let mut task_failed = new_test_task();
+        task_failed.start_planning().expect("start_planning");
+        task_failed
+            .request_approval(sample_plan())
+            .expect("request_approval");
+        task_failed.approve().expect("approve");
+        task_failed.fail().expect("fail");
+        assert_eq!(task_failed.state(), TaskState::Failed);
+        let snap = task_to_snapshot(&task_failed);
+        assert_eq!(snap.state, "failed");
+    }
+
+    #[test]
+    fn task_to_snapshot_maps_both_execution_modes() {
+        let mut task = new_test_task();
+        task.set_execution_mode(ExecutionMode::Plan);
+        let snap_plan = task_to_snapshot(&task);
+        assert_eq!(snap_plan.execution_mode, "plan");
+
+        task.set_execution_mode(ExecutionMode::Act);
+        let snap_act = task_to_snapshot(&task);
+        assert_eq!(snap_act.execution_mode, "act");
+    }
+
+    #[test]
+    fn task_to_snapshot_maps_budget_fields_and_optional_limits() {
+        let budget_without_limits = ResourceBudget::new(100, 200, 3).expect("budget");
+        let task_without_limits = Task::new(
+            TaskId::new("task-no-limits").expect("id"),
+            "Goal",
+            budget_without_limits,
+        )
+        .expect("task");
+        let snap = task_to_snapshot(&task_without_limits);
+        assert_eq!(snap.budget.max_memory_bytes, 100);
+        assert_eq!(snap.budget.max_disk_write_bytes, 200);
+        assert_eq!(snap.budget.max_concurrent_tools, 3);
+        assert_eq!(snap.budget.max_prompt_tokens, None);
+        assert_eq!(snap.budget.max_completion_tokens, None);
+        assert_eq!(snap.budget.max_cost_micros, None);
+
+        let budget_with_limits = ResourceBudget::new(100, 200, 3)
+            .expect("budget")
+            .with_token_limits(5000, 1000, 25000)
+            .expect("token limits");
+        let task_with_limits = Task::new(
+            TaskId::new("task-with-limits").expect("id"),
+            "Goal",
+            budget_with_limits,
+        )
+        .expect("task");
+        let snap = task_to_snapshot(&task_with_limits);
+        assert_eq!(snap.budget.max_prompt_tokens, Some(5000));
+        assert_eq!(snap.budget.max_completion_tokens, Some(1000));
+        assert_eq!(snap.budget.max_cost_micros, Some(25000));
+    }
+}

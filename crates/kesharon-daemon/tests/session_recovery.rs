@@ -133,6 +133,9 @@ fn daemon_session_recovers_last_active_project_and_task_on_startup() {
         128 * 1024 * 1024
     );
     assert_eq!(recovered_task_snapshot.budget.max_concurrent_tools, 1);
+    assert!(recovered_task_snapshot.budget.max_prompt_tokens.is_none());
+    assert!(recovered_task_snapshot.budget.max_completion_tokens.is_none());
+    assert!(recovered_task_snapshot.budget.max_cost_micros.is_none());
 
     let recovered_task = session
         .active_task()
@@ -140,6 +143,77 @@ fn daemon_session_recovers_last_active_project_and_task_on_startup() {
         .expect("active task is recovered");
     assert_eq!(recovered_task.id().as_str(), "task-active-99");
     assert_eq!(recovered_task.goal(), "Active task to recover");
+}
+
+#[test]
+fn daemon_session_recovers_task_with_token_and_cost_limits_on_startup() {
+    let mut storage = SqliteStateRepository::in_memory().expect("in-memory db");
+    let project = Project::new(
+        ProjectId::new("proj-recovered-limits").expect("valid id"),
+        "Project With Token Limits",
+        "D:\\repos\\token_limits",
+        true,
+    )
+    .expect("valid project");
+    storage.save_project(&project).expect("saved project");
+
+    let budget = ResourceBudget::new(512 * 1024 * 1024, 64 * 1024 * 1024, 2)
+        .expect("valid budget")
+        .with_token_limits(20_000, 4_000, 750_000)
+        .expect("valid token limits");
+    let task = Task::new(
+        TaskId::new("task-with-limits-99").expect("valid id"),
+        "Active task with token limits",
+        budget,
+    )
+    .expect("valid task");
+    storage.save_task(&task).expect("saved active task");
+
+    let storage_boxed: Box<dyn StateRepository + Send + Sync> = Box::new(storage);
+    let storage_arc: SharedStateRepository = Arc::new(Mutex::new(storage_boxed));
+
+    let session = DaemonSession::with_storage(
+        "stream-recovery-limits",
+        Arc::new(StubRepository),
+        Arc::new(FixedId),
+        Some(storage_arc),
+    )
+    .expect("session created with storage");
+
+    let subscription = session.subscribe().expect("subscription succeeds");
+    let recovered_task_snapshot = subscription
+        .snapshot
+        .active_task()
+        .expect("active task is present in snapshot");
+
+    assert_eq!(recovered_task_snapshot.id, "task-with-limits-99");
+    assert_eq!(
+        recovered_task_snapshot.goal,
+        "Active task with token limits"
+    );
+    assert_eq!(recovered_task_snapshot.state, "draft");
+    assert_eq!(recovered_task_snapshot.execution_mode, "plan");
+    assert_eq!(
+        recovered_task_snapshot.budget.max_memory_bytes,
+        512 * 1024 * 1024
+    );
+    assert_eq!(
+        recovered_task_snapshot.budget.max_disk_write_bytes,
+        64 * 1024 * 1024
+    );
+    assert_eq!(recovered_task_snapshot.budget.max_concurrent_tools, 2);
+    assert_eq!(
+        recovered_task_snapshot.budget.max_prompt_tokens,
+        Some(20_000)
+    );
+    assert_eq!(
+        recovered_task_snapshot.budget.max_completion_tokens,
+        Some(4_000)
+    );
+    assert_eq!(
+        recovered_task_snapshot.budget.max_cost_micros,
+        Some(750_000)
+    );
 }
 
 #[test]

@@ -210,6 +210,10 @@ impl Task {
         self.transition(TaskState::AwaitingReview, TaskState::Completed, "accept")
     }
 
+    pub fn fail(&mut self) -> Result<(), TaskError> {
+        self.transition(TaskState::Executing, TaskState::Failed, "fail")
+    }
+
     fn transition(
         &mut self,
         from: TaskState,

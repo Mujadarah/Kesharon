@@ -80,6 +80,26 @@ fn rejecting_approval_cancels_without_entering_execution() {
 }
 
 #[test]
+fn failing_execution_marks_task_as_failed_and_terminal() {
+    let mut task = Task::new(
+        TaskId::new("task-fail").expect("the fixture task id is valid"),
+        "Fail during execution",
+        budget(),
+    )
+    .expect("the fixture task is valid");
+    task.start_planning().expect("planning succeeds");
+    task.request_approval(plan()).expect("approval request succeeds");
+    task.approve().expect("approval succeeds");
+    assert_eq!(task.state(), TaskState::Executing);
+
+    task.fail().expect("executing task can fail");
+    assert_eq!(task.state(), TaskState::Failed);
+    assert!(task.state().is_terminal());
+    assert!(!task.is_active());
+    assert_eq!(task.pause(), Err(TaskError::TerminalState));
+}
+
+#[test]
 fn invalid_transition_is_rejected_without_changing_state() {
     let mut task = Task::new(
         TaskId::new("task-3").expect("the fixture task id is valid"),
