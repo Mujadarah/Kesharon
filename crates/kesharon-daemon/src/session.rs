@@ -467,6 +467,7 @@ impl DaemonSession {
             state.sequence,
             state.project.clone(),
             active_operations,
+            None,
         )
     }
 

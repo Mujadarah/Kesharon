@@ -10,7 +10,8 @@ import {
   decodeDaemonStreamUpdate,
   decodeHealthResponse,
   decodeProjectOpenResponse,
-  decodeStreamMessage
+  decodeStreamMessage,
+  decodeWorkspaceSnapshot
 } from "./index";
 
 describe("decodeHealthResponse", () => {
@@ -241,5 +242,172 @@ describe("session protocol", () => {
     expect(() => decodeDaemonStreamUpdate({ type: "unavailable" })).toThrow(
       ProtocolDecodeError
     );
+  });
+});
+
+describe("decodeWorkspaceSnapshot", () => {
+  it("decodes workspace snapshot with activeTask present and full budget", () => {
+    const raw = {
+      streamId: "stream-task-1",
+      lastSequence: 10,
+      project: null,
+      activeOperations: [],
+      activeTask: {
+        id: "task-100",
+        goal: "Build feature",
+        state: "running",
+        executionMode: "autonomous",
+        budget: {
+          maxMemoryBytes: 1048576,
+          maxDiskWriteBytes: 2097152,
+          maxConcurrentTools: 4,
+          maxPromptTokens: 50000,
+          maxCompletionTokens: 2000,
+          maxCostMicros: 100000
+        }
+      }
+    };
+    expect(decodeWorkspaceSnapshot(raw)).toEqual({
+      streamId: "stream-task-1",
+      lastSequence: 10,
+      project: null,
+      activeOperations: [],
+      activeTask: {
+        id: "task-100",
+        goal: "Build feature",
+        state: "running",
+        executionMode: "autonomous",
+        budget: {
+          maxMemoryBytes: 1048576,
+          maxDiskWriteBytes: 2097152,
+          maxConcurrentTools: 4,
+          maxPromptTokens: 50000,
+          maxCompletionTokens: 2000,
+          maxCostMicros: 100000
+        }
+      }
+    });
+  });
+
+  it("decodes workspace snapshot with activeTask present and minimal budget", () => {
+    const raw = {
+      streamId: "stream-task-1",
+      lastSequence: 10,
+      project: null,
+      activeOperations: [],
+      activeTask: {
+        id: "task-101",
+        goal: "Build feature 2",
+        state: "idle",
+        executionMode: "supervised",
+        budget: {
+          maxMemoryBytes: 1048576,
+          maxDiskWriteBytes: 2097152,
+          maxConcurrentTools: 2
+        }
+      }
+    };
+    expect(decodeWorkspaceSnapshot(raw)).toEqual({
+      streamId: "stream-task-1",
+      lastSequence: 10,
+      project: null,
+      activeOperations: [],
+      activeTask: {
+        id: "task-101",
+        goal: "Build feature 2",
+        state: "idle",
+        executionMode: "supervised",
+        budget: {
+          maxMemoryBytes: 1048576,
+          maxDiskWriteBytes: 2097152,
+          maxConcurrentTools: 2
+        }
+      }
+    });
+  });
+
+  it("decodes workspace snapshot with activeTask explicitly null", () => {
+    const raw = {
+      streamId: "stream-task-2",
+      lastSequence: 2,
+      project: null,
+      activeOperations: [],
+      activeTask: null
+    };
+    expect(decodeWorkspaceSnapshot(raw)).toEqual({
+      streamId: "stream-task-2",
+      lastSequence: 2,
+      project: null,
+      activeOperations: [],
+      activeTask: null
+    });
+  });
+
+  it("decodes workspace snapshot with activeTask undefined/omitted normalizing to null", () => {
+    const raw = {
+      streamId: "stream-task-3",
+      lastSequence: 0,
+      project: null,
+      activeOperations: []
+    };
+    expect(decodeWorkspaceSnapshot(raw)).toEqual({
+      streamId: "stream-task-3",
+      lastSequence: 0,
+      project: null,
+      activeOperations: [],
+      activeTask: null
+    });
+  });
+
+  it("decodes stream message containing a snapshot with activeTask", () => {
+    const message = {
+      messageType: "snapshot" as const,
+      snapshot: {
+        streamId: "stream-task-4",
+        lastSequence: 1,
+        project: null,
+        activeOperations: [],
+        activeTask: {
+          id: "task-102",
+          goal: "Testing",
+          state: "running",
+          executionMode: "autonomous",
+          budget: {
+            maxMemoryBytes: 500,
+            maxDiskWriteBytes: 600,
+            maxConcurrentTools: 1
+          }
+        }
+      }
+    };
+    expect(decodeStreamMessage(message)).toEqual(message);
+  });
+
+  it("rejects malformed workspace snapshot or activeTask", () => {
+    expect(() => decodeWorkspaceSnapshot(null)).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeWorkspaceSnapshot({
+        streamId: "stream-1",
+        lastSequence: 1,
+        project: null,
+        activeOperations: [],
+        activeTask: { id: "bad" }
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeWorkspaceSnapshot({
+        streamId: "stream-1",
+        lastSequence: 1,
+        project: null,
+        activeOperations: [],
+        activeTask: {
+          id: "t1",
+          goal: "g",
+          state: "s",
+          executionMode: "m",
+          budget: { maxMemoryBytes: -1, maxDiskWriteBytes: 0, maxConcurrentTools: 1 }
+        }
+      })
+    ).toThrow(ProtocolDecodeError);
   });
 });

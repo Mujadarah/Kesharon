@@ -201,7 +201,8 @@ describe("App Component", () => {
             canonicalRoot: "D:\\external\\repo",
             trusted: false
           },
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       });
     });
@@ -241,7 +242,8 @@ describe("App Component", () => {
             canonicalRoot: "D:\\code\\my-app",
             trusted: true
           },
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       });
     });
@@ -319,7 +321,8 @@ describe("App Component", () => {
             canonicalRoot: "D:\\code\\restored",
             trusted: true
           },
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       });
     });

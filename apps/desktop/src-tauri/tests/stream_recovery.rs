@@ -248,7 +248,7 @@ fn stream_worker_reconnects_with_exponential_backoff_on_disconnect() {
 
             // Send Snapshot (seq 0)
             let snapshot1 = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-backoff-1", 0, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-backoff-1", 0, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream1,
@@ -305,6 +305,7 @@ fn stream_worker_reconnects_with_exponential_backoff_on_disconnect() {
                                     10,
                                     None,
                                     vec![],
+                                    None,
                                 ),
                             };
                             let _ = write_all_with_timeout(
@@ -415,7 +416,7 @@ fn stream_worker_detects_sequence_gap_and_recovers_via_snapshot() {
 
             // Snapshot (seq 0)
             let snapshot1 = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-gap-1", 0, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-gap-1", 0, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream1,
@@ -481,7 +482,7 @@ fn stream_worker_detects_sequence_gap_and_recovers_via_snapshot() {
 
             // Fresh Authoritative Snapshot covering up to sequence 5
             let fresh_snapshot = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-gap-1", 5, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-gap-1", 5, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream2,
@@ -573,7 +574,7 @@ fn stream_worker_detects_stream_id_change_and_recovers_via_snapshot() {
 
             // Snapshot stream-alpha (seq 0)
             let snapshot1 = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-alpha", 0, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-alpha", 0, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream1,
@@ -620,7 +621,7 @@ fn stream_worker_detects_stream_id_change_and_recovers_via_snapshot() {
             );
 
             let fresh_snapshot = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-beta", 1, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-beta", 1, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream2,
@@ -704,7 +705,7 @@ fn stream_worker_recovers_after_daemon_restart() {
         );
 
         let snapshot1 = StreamMessage::Snapshot {
-            snapshot: WorkspaceSnapshot::new("stream-d1", 0, None, vec![]),
+            snapshot: WorkspaceSnapshot::new("stream-d1", 0, None, vec![], None),
         };
         let _ = write_all_with_timeout(
             &stream1,

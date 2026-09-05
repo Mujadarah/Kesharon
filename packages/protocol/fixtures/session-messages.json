@@ -81,7 +81,8 @@
       },
       "activeOperations": [
         { "requestId": "request-open-2", "kind": "openProject", "status": "running" }
-      ]
+      ],
+      "activeTask": null
     }
   },
   "eventMessage": {

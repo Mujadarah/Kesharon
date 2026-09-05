@@ -30,11 +30,29 @@ export interface OperationSnapshot {
   status: "running";
 }
 
+export interface ResourceBudgetSnapshot {
+  maxMemoryBytes: number;
+  maxDiskWriteBytes: number;
+  maxConcurrentTools: number;
+  maxPromptTokens?: number;
+  maxCompletionTokens?: number;
+  maxCostMicros?: number;
+}
+
+export interface TaskSnapshot {
+  id: string;
+  goal: string;
+  state: string;
+  executionMode: string;
+  budget: ResourceBudgetSnapshot;
+}
+
 export interface WorkspaceSnapshot {
   streamId: string;
   lastSequence: number;
   project: ProjectSnapshot | null;
   activeOperations: OperationSnapshot[];
+  activeTask: TaskSnapshot | null;
 }
 
 export type DaemonEventPayload =
@@ -222,8 +240,11 @@ export function decodeStreamMessage(value: unknown): StreamMessage {
   if (!isRecord(value)) {
     throw new ProtocolDecodeError("Malformed daemon stream message");
   }
-  if (value.messageType === "snapshot" && isWorkspaceSnapshot(value.snapshot)) {
-    return value as unknown as StreamMessage;
+  if (value.messageType === "snapshot") {
+    return {
+      messageType: "snapshot",
+      snapshot: decodeWorkspaceSnapshot(value.snapshot)
+    };
   }
   if (
     value.messageType === "event" &&
@@ -239,6 +260,67 @@ export function decodeStreamMessage(value: unknown): StreamMessage {
   throw new ProtocolDecodeError("Malformed daemon stream message");
 }
 
+export function decodeResourceBudgetSnapshot(
+  value: unknown
+): ResourceBudgetSnapshot {
+  if (!isResourceBudgetSnapshot(value)) {
+    throw new ProtocolDecodeError("Malformed resource budget snapshot");
+  }
+  return {
+    maxMemoryBytes: value.maxMemoryBytes,
+    maxDiskWriteBytes: value.maxDiskWriteBytes,
+    maxConcurrentTools: value.maxConcurrentTools,
+    ...(value.maxPromptTokens !== undefined && {
+      maxPromptTokens: value.maxPromptTokens
+    }),
+    ...(value.maxCompletionTokens !== undefined && {
+      maxCompletionTokens: value.maxCompletionTokens
+    }),
+    ...(value.maxCostMicros !== undefined && {
+      maxCostMicros: value.maxCostMicros
+    })
+  };
+}
+
+export function decodeTaskSnapshot(value: unknown): TaskSnapshot {
+  if (!isTaskSnapshot(value)) {
+    throw new ProtocolDecodeError("Malformed task snapshot");
+  }
+  return {
+    id: value.id,
+    goal: value.goal,
+    state: value.state,
+    executionMode: value.executionMode,
+    budget: decodeResourceBudgetSnapshot(value.budget)
+  };
+}
+
+export function decodeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
+  const candidate =
+    isRecord(value) && value.messageType === "snapshot"
+      ? value.snapshot
+      : value;
+
+  if (!isWorkspaceSnapshotCandidate(candidate)) {
+    throw new ProtocolDecodeError("Malformed workspace snapshot");
+  }
+
+  return {
+    streamId: candidate.streamId,
+    lastSequence: candidate.lastSequence,
+    project: candidate.project ? { ...candidate.project } : null,
+    activeOperations: candidate.activeOperations.map((operation) => ({
+      requestId: operation.requestId,
+      kind: operation.kind,
+      status: operation.status
+    })),
+    activeTask:
+      candidate.activeTask !== undefined && candidate.activeTask !== null
+        ? decodeTaskSnapshot(candidate.activeTask)
+        : null
+  };
+}
+
 function isProjectSnapshot(value: unknown): value is ProjectSnapshot {
   return (
     isRecord(value) &&
@@ -249,21 +331,105 @@ function isProjectSnapshot(value: unknown): value is ProjectSnapshot {
   );
 }
 
-function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
+function isResourceBudgetSnapshot(
+  value: unknown
+): value is ResourceBudgetSnapshot {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    typeof value.maxMemoryBytes !== "number" ||
+    !Number.isFinite(value.maxMemoryBytes) ||
+    value.maxMemoryBytes < 0 ||
+    typeof value.maxDiskWriteBytes !== "number" ||
+    !Number.isFinite(value.maxDiskWriteBytes) ||
+    value.maxDiskWriteBytes < 0 ||
+    typeof value.maxConcurrentTools !== "number" ||
+    !Number.isInteger(value.maxConcurrentTools) ||
+    value.maxConcurrentTools < 0
+  ) {
+    return false;
+  }
+  if (
+    value.maxPromptTokens !== undefined &&
+    (typeof value.maxPromptTokens !== "number" ||
+      !Number.isFinite(value.maxPromptTokens) ||
+      value.maxPromptTokens < 0)
+  ) {
+    return false;
+  }
+  if (
+    value.maxCompletionTokens !== undefined &&
+    (typeof value.maxCompletionTokens !== "number" ||
+      !Number.isFinite(value.maxCompletionTokens) ||
+      value.maxCompletionTokens < 0)
+  ) {
+    return false;
+  }
+  if (
+    value.maxCostMicros !== undefined &&
+    (typeof value.maxCostMicros !== "number" ||
+      !Number.isFinite(value.maxCostMicros) ||
+      value.maxCostMicros < 0)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isTaskSnapshot(value: unknown): value is TaskSnapshot {
   return (
     isRecord(value) &&
-    typeof value.streamId === "string" &&
-    Number.isSafeInteger(value.lastSequence) &&
-    (value.lastSequence as number) >= 0 &&
-    (value.project === null || isProjectSnapshot(value.project)) &&
-    Array.isArray(value.activeOperations) &&
-    value.activeOperations.every(
+    typeof value.id === "string" &&
+    typeof value.goal === "string" &&
+    typeof value.state === "string" &&
+    typeof value.executionMode === "string" &&
+    isResourceBudgetSnapshot(value.budget)
+  );
+}
+
+interface WorkspaceSnapshotCandidate {
+  streamId: string;
+  lastSequence: number;
+  project: ProjectSnapshot | null;
+  activeOperations: OperationSnapshot[];
+  activeTask?: unknown;
+}
+
+function isWorkspaceSnapshotCandidate(
+  value: unknown
+): value is WorkspaceSnapshotCandidate {
+  if (
+    !isRecord(value) ||
+    typeof value.streamId !== "string" ||
+    !Number.isSafeInteger(value.lastSequence) ||
+    (value.lastSequence as number) < 0 ||
+    (value.project !== null && !isProjectSnapshot(value.project)) ||
+    !Array.isArray(value.activeOperations) ||
+    !value.activeOperations.every(
       (operation) =>
         isRecord(operation) &&
         typeof operation.requestId === "string" &&
         operation.kind === "openProject" &&
         operation.status === "running"
     )
+  ) {
+    return false;
+  }
+  if (
+    value.activeTask !== undefined &&
+    value.activeTask !== null &&
+    !isTaskSnapshot(value.activeTask)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
+  return (
+    isWorkspaceSnapshotCandidate(value) &&
+    (value.activeTask === null || isTaskSnapshot(value.activeTask))
   );
 }
 

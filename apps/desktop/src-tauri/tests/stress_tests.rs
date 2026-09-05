@@ -612,13 +612,25 @@ fn resilience_unexpected_snapshot_in_read_next_event() {
 
         // 2. Send Initial Snapshot
         let snapshot = StreamMessage::Snapshot {
-            snapshot: kesharon_protocol::WorkspaceSnapshot::new("stream-test-1", 0, None, vec![]),
+            snapshot: kesharon_protocol::WorkspaceSnapshot::new(
+                "stream-test-1",
+                0,
+                None,
+                vec![],
+                None,
+            ),
         };
         let _ = stream.write_all(&encode_frame(&snapshot).unwrap());
 
         // 3. Send a SECOND Snapshot instead of an Event
         let second_snapshot = StreamMessage::Snapshot {
-            snapshot: kesharon_protocol::WorkspaceSnapshot::new("stream-test-1", 1, None, vec![]),
+            snapshot: kesharon_protocol::WorkspaceSnapshot::new(
+                "stream-test-1",
+                1,
+                None,
+                vec![],
+                None,
+            ),
         };
         let _ = stream.write_all(&encode_frame(&second_snapshot).unwrap());
     });

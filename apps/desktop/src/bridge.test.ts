@@ -166,7 +166,8 @@ describe("tauriBridge", () => {
             canonicalRoot: "D:\\code\\kesharon",
             trusted: true
           },
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       }
     });
@@ -196,7 +197,8 @@ describe("tauriBridge", () => {
             canonicalRoot: "D:\\code\\kesharon",
             trusted: true
           },
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       }
     });

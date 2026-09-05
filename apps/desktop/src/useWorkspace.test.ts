@@ -110,7 +110,8 @@ describe("useWorkspace", () => {
           streamId: "stream-alpha",
           lastSequence: 10,
           project,
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       });
     });
@@ -403,7 +404,8 @@ describe("useWorkspace", () => {
           streamId: "s2",
           lastSequence: 0,
           project: null,
-          activeOperations: []
+          activeOperations: [],
+          activeTask: null
         }
       });
     });

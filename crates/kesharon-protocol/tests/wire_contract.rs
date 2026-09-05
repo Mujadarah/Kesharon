@@ -1,8 +1,9 @@
 use kesharon_protocol::{
     CancellationOutcome, ClientRequest, DaemonEventPayload, ErrorCode, HealthStatus, LaunchToken,
-    MAX_FRAME_BYTES, PROTOCOL_VERSION, ProtocolError, RequestMethod, ResponsePayload,
-    ServerResponse, StreamMessage, decode_client_request_frame, decode_server_response_frame,
-    decode_stream_message_frame, encode_frame,
+    MAX_FRAME_BYTES, PROTOCOL_VERSION, ProtocolError, RequestMethod, ResourceBudgetSnapshot,
+    ResponsePayload, ServerResponse, StreamMessage, TaskSnapshot, WorkspaceSnapshot,
+    decode_client_request_frame, decode_server_response_frame, decode_stream_message_frame,
+    encode_frame,
 };
 use serde_json::Value;
 
@@ -278,4 +279,102 @@ fn cancel_requests_require_idempotency() {
         ),
         Err(ProtocolError::MissingIdempotencyKey)
     );
+}
+
+#[test]
+fn workspace_snapshot_with_active_task_round_trips() {
+    let budget = ResourceBudgetSnapshot {
+        max_memory_bytes: 1024 * 1024 * 1024,
+        max_disk_write_bytes: 512 * 1024 * 1024,
+        max_concurrent_tools: 4,
+        max_prompt_tokens: Some(100_000),
+        max_completion_tokens: Some(4_000),
+        max_cost_micros: Some(500_000),
+    };
+    let task = TaskSnapshot {
+        id: "task-01".to_string(),
+        goal: "Implement Task 1".to_string(),
+        state: "running".to_string(),
+        execution_mode: "autonomous".to_string(),
+        budget,
+    };
+    let snapshot = WorkspaceSnapshot::new("stream-task-1", 10, None, vec![], Some(task.clone()));
+
+    assert_eq!(snapshot.active_task(), Some(&task));
+
+    let message = StreamMessage::Snapshot {
+        snapshot: snapshot.clone(),
+    };
+    let frame = encode_frame(&message).expect("message is encodable");
+    let decoded = decode_stream_message_frame(&frame).expect("snapshot frame decodes");
+
+    assert_eq!(decoded, message);
+
+    let json = serde_json::to_string(&snapshot).expect("snapshot serializes to json");
+    assert!(json.contains("\"activeTask\""));
+    assert!(json.contains("\"maxPromptTokens\":100000"));
+
+    let deserialized: WorkspaceSnapshot =
+        serde_json::from_str(&json).expect("snapshot deserializes from json");
+    assert_eq!(deserialized, snapshot);
+}
+
+#[test]
+fn workspace_snapshot_without_active_task_omits_field_and_round_trips() {
+    let snapshot = WorkspaceSnapshot::new("stream-task-2", 0, None, vec![], None);
+
+    assert_eq!(snapshot.active_task(), None);
+
+    let json = serde_json::to_string(&snapshot).expect("snapshot serializes to json");
+    assert!(!json.contains("\"activeTask\""));
+
+    let deserialized: WorkspaceSnapshot =
+        serde_json::from_str(&json).expect("snapshot deserializes from json without activeTask");
+    assert_eq!(deserialized, snapshot);
+    assert!(deserialized.active_task().is_none());
+
+    let json_with_null = json.replacen(
+        "\"streamId\":\"stream-task-2\"",
+        "\"streamId\":\"stream-task-2\",\"activeTask\":null",
+        1,
+    );
+    let deserialized_null: WorkspaceSnapshot =
+        serde_json::from_str(&json_with_null).expect("snapshot deserializes with activeTask: null");
+    assert_eq!(deserialized_null, snapshot);
+    assert!(deserialized_null.active_task().is_none());
+}
+
+#[test]
+fn resource_budget_snapshot_round_trips_optional_fields() {
+    let minimal_budget = ResourceBudgetSnapshot {
+        max_memory_bytes: 256 * 1024 * 1024,
+        max_disk_write_bytes: 64 * 1024 * 1024,
+        max_concurrent_tools: 2,
+        max_prompt_tokens: None,
+        max_completion_tokens: None,
+        max_cost_micros: None,
+    };
+
+    let json = serde_json::to_string(&minimal_budget).expect("budget serializes");
+    assert!(!json.contains("maxPromptTokens"));
+    assert!(!json.contains("maxCompletionTokens"));
+    assert!(!json.contains("maxCostMicros"));
+
+    let deserialized: ResourceBudgetSnapshot =
+        serde_json::from_str(&json).expect("budget deserializes");
+    assert_eq!(deserialized, minimal_budget);
+
+    let full_budget = ResourceBudgetSnapshot {
+        max_memory_bytes: 512 * 1024 * 1024,
+        max_disk_write_bytes: 128 * 1024 * 1024,
+        max_concurrent_tools: 8,
+        max_prompt_tokens: Some(50_000),
+        max_completion_tokens: Some(2_000),
+        max_cost_micros: Some(10_000),
+    };
+
+    let json_full = serde_json::to_string(&full_budget).expect("full budget serializes");
+    let deserialized_full: ResourceBudgetSnapshot =
+        serde_json::from_str(&json_full).expect("full budget deserializes");
+    assert_eq!(deserialized_full, full_budget);
 }

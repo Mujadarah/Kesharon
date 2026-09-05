@@ -346,7 +346,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\code\\kesharon-agent",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -413,7 +414,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\code\\repo-1",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -434,7 +436,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
             streamId: "stream-s1",
             lastSequence: 2,
             project: null,
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -459,7 +462,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\code\\repo-1",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -487,7 +491,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\Proiecte AI\\Kesharon Agent",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -519,7 +524,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "C:\\Users\\Public\\third-party-lib",
               trusted: false
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -563,7 +569,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\code\\first-repo",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -602,7 +609,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\code\\live-app",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });
@@ -635,7 +643,8 @@ describe("Empirical Challenge Suite: UI Interactions & State Transitions", () =>
               canonicalRoot: "D:\\code\\live-app",
               trusted: true
             },
-            activeOperations: []
+            activeOperations: [],
+            activeTask: null
           }
         });
       });

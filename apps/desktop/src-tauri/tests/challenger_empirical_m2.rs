@@ -159,7 +159,7 @@ fn empirical_daemon_restart_recovery_with_stream_resubscription() {
         );
 
         let snapshot1 = StreamMessage::Snapshot {
-            snapshot: WorkspaceSnapshot::new("stream-d1", 0, None, vec![]),
+            snapshot: WorkspaceSnapshot::new("stream-d1", 0, None, vec![], None),
         };
         let _ = write_all_with_timeout(
             &stream1,
@@ -528,7 +528,7 @@ fn empirical_repeated_stream_id_flips() {
                 );
 
                 let snapshot = StreamMessage::Snapshot {
-                    snapshot: WorkspaceSnapshot::new(stream_id, last_seq, None, vec![]),
+                    snapshot: WorkspaceSnapshot::new(stream_id, last_seq, None, vec![], None),
                 };
                 let _ = write_all_with_timeout(
                     stream,
@@ -738,7 +738,7 @@ fn empirical_sequence_backward_and_duplicate_anomalies() {
 
             // Snapshot (seq 10)
             let snapshot1 = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-anom", 10, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-anom", 10, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream1,
@@ -795,7 +795,7 @@ fn empirical_sequence_backward_and_duplicate_anomalies() {
 
             // Fresh Snapshot (seq 12)
             let snapshot2 = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-anom", 12, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-anom", 12, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream2,
@@ -845,7 +845,7 @@ fn empirical_sequence_backward_and_duplicate_anomalies() {
 
             // Final Snapshot (seq 20)
             let snapshot3 = StreamMessage::Snapshot {
-                snapshot: WorkspaceSnapshot::new("stream-anom", 20, None, vec![]),
+                snapshot: WorkspaceSnapshot::new("stream-anom", 20, None, vec![], None),
             };
             let _ = write_all_with_timeout(
                 &stream3,
@@ -977,7 +977,7 @@ fn empirical_abrupt_socket_termination_during_handshake_phases() {
                 );
 
                 let snapshot = StreamMessage::Snapshot {
-                    snapshot: WorkspaceSnapshot::new("stream-p4", 42, None, vec![]),
+                    snapshot: WorkspaceSnapshot::new("stream-p4", 42, None, vec![], None),
                 };
                 let _ = write_all_with_timeout(
                     &stream,

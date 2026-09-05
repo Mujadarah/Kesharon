@@ -160,6 +160,7 @@ pub const fn lifecycle_action(explicit_quit: bool) -> LifecycleAction {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum DaemonStreamUpdate {
     Message { message: StreamMessage },
     Reconnecting,

@@ -190,11 +190,37 @@ pub struct OperationSnapshot {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResourceBudgetSnapshot {
+    pub max_memory_bytes: u64,
+    pub max_disk_write_bytes: u64,
+    pub max_concurrent_tools: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_prompt_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_micros: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSnapshot {
+    pub id: String,
+    pub goal: String,
+    pub state: String,
+    pub execution_mode: String,
+    pub budget: ResourceBudgetSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceSnapshot {
     stream_id: String,
     last_sequence: u64,
     project: Option<ProjectSnapshot>,
     active_operations: Vec<OperationSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_task: Option<TaskSnapshot>,
 }
 
 impl WorkspaceSnapshot {
@@ -203,12 +229,14 @@ impl WorkspaceSnapshot {
         last_sequence: u64,
         project: Option<ProjectSnapshot>,
         active_operations: Vec<OperationSnapshot>,
+        active_task: Option<TaskSnapshot>,
     ) -> Self {
         Self {
             stream_id: stream_id.into(),
             last_sequence,
             project,
             active_operations,
+            active_task,
         }
     }
 
@@ -226,6 +254,10 @@ impl WorkspaceSnapshot {
 
     pub fn active_operations(&self) -> &[OperationSnapshot] {
         &self.active_operations
+    }
+
+    pub const fn active_task(&self) -> Option<&TaskSnapshot> {
+        self.active_task.as_ref()
     }
 }
 
