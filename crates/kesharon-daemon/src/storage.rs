@@ -322,20 +322,19 @@ impl StateRepository for SqliteStateRepository {
     }
 
     fn load_active_task(&self, project_id: &str) -> Result<Option<Task>, ApplicationError> {
-        let conn = self
-            .connection
-            .lock()
-            .map_err(|_| ApplicationError::Storage("mutex poisoned".into()))?;
+        let task_id_opt: Option<String> = {
+            let conn = self
+                .connection
+                .lock()
+                .map_err(|_| ApplicationError::Storage("mutex poisoned".into()))?;
 
-        let task_id_opt: Option<String> = conn
-            .query_row(
+            conn.query_row(
                 "SELECT id FROM tasks WHERE project_id = ?1 AND is_active = 1 ORDER BY rowid DESC LIMIT 1",
                 params![project_id],
                 |row| row.get(0),
             )
-            .ok();
-
-        drop(conn);
+            .ok()
+        };
 
         match task_id_opt {
             Some(id) => self.load_task(&id),
