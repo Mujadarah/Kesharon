@@ -378,3 +378,52 @@ fn resource_budget_snapshot_round_trips_optional_fields() {
         serde_json::from_str(&json_full).expect("full budget deserializes");
     assert_eq!(deserialized_full, full_budget);
 }
+
+#[test]
+fn malformed_task_snapshot_and_resource_budget_shapes_fail_deserialization() {
+    // Missing required field in ResourceBudgetSnapshot
+    let missing_memory = r#"{"maxDiskWriteBytes":100,"maxConcurrentTools":1}"#;
+    assert!(serde_json::from_str::<ResourceBudgetSnapshot>(missing_memory).is_err());
+
+    // Negative integer where unsigned integer expected
+    let negative_memory = r#"{"maxMemoryBytes":-1,"maxDiskWriteBytes":100,"maxConcurrentTools":1}"#;
+    assert!(serde_json::from_str::<ResourceBudgetSnapshot>(negative_memory).is_err());
+
+    // Overflow u16 bound for maxConcurrentTools
+    let overflow_tools =
+        r#"{"maxMemoryBytes":100,"maxDiskWriteBytes":100,"maxConcurrentTools":65536}"#;
+    assert!(serde_json::from_str::<ResourceBudgetSnapshot>(overflow_tools).is_err());
+
+    // Negative optional token ceiling
+    let negative_token = r#"{"maxMemoryBytes":100,"maxDiskWriteBytes":100,"maxConcurrentTools":1,"maxPromptTokens":-1}"#;
+    assert!(serde_json::from_str::<ResourceBudgetSnapshot>(negative_token).is_err());
+
+    // Missing id in TaskSnapshot
+    let missing_task_id = r#"{
+        "goal": "Test goal",
+        "state": "running",
+        "executionMode": "autonomous",
+        "budget": {"maxMemoryBytes":100,"maxDiskWriteBytes":100,"maxConcurrentTools":1}
+    }"#;
+    assert!(serde_json::from_str::<TaskSnapshot>(missing_task_id).is_err());
+
+    // Malformed budget inside TaskSnapshot
+    let malformed_nested_budget = r#"{
+        "id": "t-1",
+        "goal": "Test goal",
+        "state": "running",
+        "executionMode": "autonomous",
+        "budget": "not-an-object"
+    }"#;
+    assert!(serde_json::from_str::<TaskSnapshot>(malformed_nested_budget).is_err());
+
+    // Malformed activeTask in WorkspaceSnapshot
+    let malformed_active_task = r#"{
+        "streamId": "s-1",
+        "lastSequence": 1,
+        "project": null,
+        "activeOperations": [],
+        "activeTask": 12345
+    }"#;
+    assert!(serde_json::from_str::<WorkspaceSnapshot>(malformed_active_task).is_err());
+}

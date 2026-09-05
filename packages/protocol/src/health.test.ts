@@ -10,7 +10,9 @@ import {
   decodeDaemonStreamUpdate,
   decodeHealthResponse,
   decodeProjectOpenResponse,
+  decodeResourceBudgetSnapshot,
   decodeStreamMessage,
+  decodeTaskSnapshot,
   decodeWorkspaceSnapshot
 } from "./index";
 
@@ -407,6 +409,171 @@ describe("decodeWorkspaceSnapshot", () => {
           executionMode: "m",
           budget: { maxMemoryBytes: -1, maxDiskWriteBytes: 0, maxConcurrentTools: 1 }
         }
+      })
+    ).toThrow(ProtocolDecodeError);
+  });
+});
+
+describe("decodeResourceBudgetSnapshot", () => {
+  it("decodes valid complete budget", () => {
+    const raw = {
+      maxMemoryBytes: 1048576,
+      maxDiskWriteBytes: 2097152,
+      maxConcurrentTools: 8,
+      maxPromptTokens: 100000,
+      maxCompletionTokens: 4000,
+      maxCostMicros: 500000
+    };
+    expect(decodeResourceBudgetSnapshot(raw)).toEqual(raw);
+  });
+
+  it("decodes budget with optional fields omitted", () => {
+    const raw = {
+      maxMemoryBytes: 512,
+      maxDiskWriteBytes: 1024,
+      maxConcurrentTools: 1
+    };
+    expect(decodeResourceBudgetSnapshot(raw)).toEqual({
+      maxMemoryBytes: 512,
+      maxDiskWriteBytes: 1024,
+      maxConcurrentTools: 1
+    });
+  });
+
+  it("normalizes explicit null optional fields to undefined (omitted)", () => {
+    const raw = {
+      maxMemoryBytes: 512,
+      maxDiskWriteBytes: 1024,
+      maxConcurrentTools: 1,
+      maxPromptTokens: null,
+      maxCompletionTokens: null,
+      maxCostMicros: null
+    };
+    const decoded = decodeResourceBudgetSnapshot(raw);
+    expect(decoded).toEqual({
+      maxMemoryBytes: 512,
+      maxDiskWriteBytes: 1024,
+      maxConcurrentTools: 1
+    });
+    expect(decoded.maxPromptTokens).toBeUndefined();
+    expect(decoded.maxCompletionTokens).toBeUndefined();
+    expect(decoded.maxCostMicros).toBeUndefined();
+  });
+
+  it("rejects non-records and invalid numbers/bounds", () => {
+    expect(() => decodeResourceBudgetSnapshot(null)).toThrow(ProtocolDecodeError);
+    expect(() => decodeResourceBudgetSnapshot("invalid")).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeResourceBudgetSnapshot({
+        maxMemoryBytes: -1,
+        maxDiskWriteBytes: 100,
+        maxConcurrentTools: 1
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeResourceBudgetSnapshot({
+        maxMemoryBytes: 100,
+        maxDiskWriteBytes: -1,
+        maxConcurrentTools: 1
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeResourceBudgetSnapshot({
+        maxMemoryBytes: 100,
+        maxDiskWriteBytes: 100,
+        maxConcurrentTools: 65536
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeResourceBudgetSnapshot({
+        maxMemoryBytes: 100,
+        maxDiskWriteBytes: 100,
+        maxConcurrentTools: 1.5
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeResourceBudgetSnapshot({
+        maxMemoryBytes: 100,
+        maxDiskWriteBytes: 100,
+        maxConcurrentTools: 1,
+        maxPromptTokens: -5
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeResourceBudgetSnapshot({
+        maxMemoryBytes: 100,
+        maxDiskWriteBytes: 100,
+        maxConcurrentTools: 1,
+        maxCostMicros: 10.5
+      })
+    ).toThrow(ProtocolDecodeError);
+  });
+});
+
+describe("decodeTaskSnapshot", () => {
+  it("decodes valid task snapshot with full budget", () => {
+    const raw = {
+      id: "task-abc",
+      goal: "Implement review fixes",
+      state: "executing",
+      executionMode: "autonomous",
+      budget: {
+        maxMemoryBytes: 1048576,
+        maxDiskWriteBytes: 2097152,
+        maxConcurrentTools: 4,
+        maxPromptTokens: 20000
+      }
+    };
+    expect(decodeTaskSnapshot(raw)).toEqual(raw);
+  });
+
+  it("decodes task snapshot with budget null optional fields normalized", () => {
+    const raw = {
+      id: "task-def",
+      goal: "Investigate issues",
+      state: "pending",
+      executionMode: "supervised",
+      budget: {
+        maxMemoryBytes: 500,
+        maxDiskWriteBytes: 500,
+        maxConcurrentTools: 2,
+        maxPromptTokens: null,
+        maxCompletionTokens: null,
+        maxCostMicros: null
+      }
+    };
+    expect(decodeTaskSnapshot(raw)).toEqual({
+      id: "task-def",
+      goal: "Investigate issues",
+      state: "pending",
+      executionMode: "supervised",
+      budget: {
+        maxMemoryBytes: 500,
+        maxDiskWriteBytes: 500,
+        maxConcurrentTools: 2
+      }
+    });
+  });
+
+  it("rejects non-records and missing or invalid fields", () => {
+    expect(() => decodeTaskSnapshot(null)).toThrow(ProtocolDecodeError);
+    expect(() => decodeTaskSnapshot(42)).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeTaskSnapshot({
+        id: 123,
+        goal: "goal",
+        state: "state",
+        executionMode: "mode",
+        budget: { maxMemoryBytes: 1, maxDiskWriteBytes: 1, maxConcurrentTools: 1 }
+      })
+    ).toThrow(ProtocolDecodeError);
+    expect(() =>
+      decodeTaskSnapshot({
+        id: "id",
+        goal: "goal",
+        state: "state",
+        executionMode: "mode",
+        budget: { maxMemoryBytes: -1, maxDiskWriteBytes: 1, maxConcurrentTools: 1 }
       })
     ).toThrow(ProtocolDecodeError);
   });

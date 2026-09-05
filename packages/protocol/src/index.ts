@@ -266,19 +266,20 @@ export function decodeResourceBudgetSnapshot(
   if (!isResourceBudgetSnapshot(value)) {
     throw new ProtocolDecodeError("Malformed resource budget snapshot");
   }
+  const maxPromptTokens =
+    value.maxPromptTokens != null ? value.maxPromptTokens : undefined;
+  const maxCompletionTokens =
+    value.maxCompletionTokens != null ? value.maxCompletionTokens : undefined;
+  const maxCostMicros =
+    value.maxCostMicros != null ? value.maxCostMicros : undefined;
+
   return {
     maxMemoryBytes: value.maxMemoryBytes,
     maxDiskWriteBytes: value.maxDiskWriteBytes,
     maxConcurrentTools: value.maxConcurrentTools,
-    ...(value.maxPromptTokens !== undefined && {
-      maxPromptTokens: value.maxPromptTokens
-    }),
-    ...(value.maxCompletionTokens !== undefined && {
-      maxCompletionTokens: value.maxCompletionTokens
-    }),
-    ...(value.maxCostMicros !== undefined && {
-      maxCostMicros: value.maxCostMicros
-    })
+    ...(maxPromptTokens !== undefined && { maxPromptTokens }),
+    ...(maxCompletionTokens !== undefined && { maxCompletionTokens }),
+    ...(maxCostMicros !== undefined && { maxCostMicros })
   };
 }
 
@@ -338,39 +339,34 @@ function isResourceBudgetSnapshot(
     return false;
   }
   if (
-    typeof value.maxMemoryBytes !== "number" ||
-    !Number.isFinite(value.maxMemoryBytes) ||
-    value.maxMemoryBytes < 0 ||
-    typeof value.maxDiskWriteBytes !== "number" ||
-    !Number.isFinite(value.maxDiskWriteBytes) ||
-    value.maxDiskWriteBytes < 0 ||
-    typeof value.maxConcurrentTools !== "number" ||
-    !Number.isInteger(value.maxConcurrentTools) ||
-    value.maxConcurrentTools < 0
+    !Number.isSafeInteger(value.maxMemoryBytes) ||
+    (value.maxMemoryBytes as number) < 0 ||
+    !Number.isSafeInteger(value.maxDiskWriteBytes) ||
+    (value.maxDiskWriteBytes as number) < 0 ||
+    !Number.isSafeInteger(value.maxConcurrentTools) ||
+    (value.maxConcurrentTools as number) < 0 ||
+    (value.maxConcurrentTools as number) > 65535
   ) {
     return false;
   }
   if (
-    value.maxPromptTokens !== undefined &&
-    (typeof value.maxPromptTokens !== "number" ||
-      !Number.isFinite(value.maxPromptTokens) ||
-      value.maxPromptTokens < 0)
+    value.maxPromptTokens != null &&
+    (!Number.isSafeInteger(value.maxPromptTokens) ||
+      (value.maxPromptTokens as number) < 0)
   ) {
     return false;
   }
   if (
-    value.maxCompletionTokens !== undefined &&
-    (typeof value.maxCompletionTokens !== "number" ||
-      !Number.isFinite(value.maxCompletionTokens) ||
-      value.maxCompletionTokens < 0)
+    value.maxCompletionTokens != null &&
+    (!Number.isSafeInteger(value.maxCompletionTokens) ||
+      (value.maxCompletionTokens as number) < 0)
   ) {
     return false;
   }
   if (
-    value.maxCostMicros !== undefined &&
-    (typeof value.maxCostMicros !== "number" ||
-      !Number.isFinite(value.maxCostMicros) ||
-      value.maxCostMicros < 0)
+    value.maxCostMicros != null &&
+    (!Number.isSafeInteger(value.maxCostMicros) ||
+      (value.maxCostMicros as number) < 0)
   ) {
     return false;
   }
@@ -424,13 +420,6 @@ function isWorkspaceSnapshotCandidate(
     return false;
   }
   return true;
-}
-
-function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
-  return (
-    isWorkspaceSnapshotCandidate(value) &&
-    (value.activeTask === null || isTaskSnapshot(value.activeTask))
-  );
 }
 
 function isEventPayload(value: unknown): value is DaemonEventPayload {
