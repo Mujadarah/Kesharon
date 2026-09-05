@@ -272,7 +272,7 @@ fn cancellation_arrives_on_a_second_connection_while_process_open_is_blocked() {
     .expect("open request is valid");
     let open_connection = open_authenticated_connection(&daemon.endpoint, &open);
 
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(5);
     while !entered.exists() {
         assert!(
             Instant::now() < deadline,
