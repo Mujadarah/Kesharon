@@ -3,6 +3,8 @@
 mod repository;
 mod runtime;
 mod session;
+pub mod storage;
+pub mod vault;
 
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -18,7 +20,9 @@ use kesharon_protocol::{
 };
 
 pub use runtime::{MAX_ACTIVE_CONNECTIONS, ServerRuntime};
-pub use session::{DaemonSession, SessionError, SessionSubscription};
+pub use session::{DaemonSession, SessionError, SessionSubscription, SharedStateRepository};
+pub use storage::SqliteStateRepository;
+pub use vault::InMemoryCredentialVault;
 
 #[derive(Clone)]
 pub struct Daemon {

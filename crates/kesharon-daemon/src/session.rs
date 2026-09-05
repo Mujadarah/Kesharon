@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use kesharon_application::{
     ApplicationError, CancellationSignal, IdGenerator, OpenProject, OpenProjectCommand,
-    RepositoryService,
+    RepositoryService, SessionRecovery, StateRepository,
 };
 use kesharon_protocol::{
     CancellationOutcome, ClientRequest, DaemonEvent, DaemonEventPayload, ErrorCode, HealthStatus,
@@ -14,6 +14,7 @@ use kesharon_protocol::{
 };
 
 use crate::repository::{UuidIds, production_repository};
+use crate::storage::SqliteStateRepository;
 
 const IDEMPOTENCY_LIMIT: usize = 256;
 const SUBSCRIBER_CAPACITY: usize = 64;
@@ -53,6 +54,7 @@ struct CompletedMutation {
 
 struct SessionState {
     project: Option<ProjectSnapshot>,
+    active_task: Option<kesharon_domain::Task>,
     active: HashMap<String, ActiveOperation>,
     in_flight: HashMap<String, MutationFingerprint>,
     completed: HashMap<String, CompletedMutation>,
@@ -67,6 +69,7 @@ impl SessionState {
     fn new() -> Self {
         Self {
             project: None,
+            active_task: None,
             active: HashMap::new(),
             in_flight: HashMap::new(),
             completed: HashMap::new(),
@@ -90,10 +93,13 @@ pub enum SessionError {
     SequenceExhausted,
 }
 
+pub type SharedStateRepository = Arc<Mutex<Box<dyn StateRepository + Send + Sync>>>;
+
 pub struct DaemonSession {
     stream_id: String,
     repository: Arc<dyn RepositoryService + Send + Sync>,
     ids: Arc<dyn IdGenerator + Send + Sync>,
+    state_repository: Option<SharedStateRepository>,
     state: Mutex<SessionState>,
 }
 
@@ -107,16 +113,79 @@ impl DaemonSession {
             stream_id: stream_id.into(),
             repository,
             ids,
+            state_repository: None,
             state: Mutex::new(SessionState::new()),
         }
     }
 
-    pub(crate) fn production() -> Self {
-        Self::new(
+    pub fn with_storage(
+        stream_id: impl Into<String>,
+        repository: Arc<dyn RepositoryService + Send + Sync>,
+        ids: Arc<dyn IdGenerator + Send + Sync>,
+        state_repository: Option<SharedStateRepository>,
+    ) -> Result<Self, ApplicationError> {
+        let (initial_project, initial_active_task) = if let Some(ref repo_mutex) = state_repository
+        {
+            let repo = repo_mutex
+                .lock()
+                .map_err(|_| ApplicationError::Storage("State repository lock poisoned".into()))?;
+            let recovered = SessionRecovery::new(repo.as_ref()).execute()?;
+            let project = recovered.project().map(|project| ProjectSnapshot {
+                id: project.id().as_str().to_owned(),
+                display_name: project.display_name().to_owned(),
+                canonical_root: project.canonical_root().to_owned(),
+                trusted: project.is_trusted(),
+            });
+            let active_task = recovered.active_task().cloned();
+            (project, active_task)
+        } else {
+            (None, None)
+        };
+
+        let mut initial_state = SessionState::new();
+        initial_state.project = initial_project;
+        initial_state.active_task = initial_active_task;
+
+        Ok(Self {
+            stream_id: stream_id.into(),
+            repository,
+            ids,
+            state_repository,
+            state: Mutex::new(initial_state),
+        })
+    }
+
+    pub fn active_task(&self) -> Result<Option<kesharon_domain::Task>, SessionError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| SessionError::StateUnavailable)?;
+        Ok(state.active_task.clone())
+    }
+
+    pub fn try_production() -> Result<Self, ApplicationError> {
+        let storage: Option<SharedStateRepository> =
+            if let Some(path) = std::env::var_os("KESHARON_STATE_DB") {
+                let repo = SqliteStateRepository::open(path)?;
+                Some(Arc::new(Mutex::new(
+                    Box::new(repo) as Box<dyn StateRepository + Send + Sync>
+                )))
+            } else {
+                let repo = SqliteStateRepository::in_memory()?;
+                Some(Arc::new(Mutex::new(
+                    Box::new(repo) as Box<dyn StateRepository + Send + Sync>
+                )))
+            };
+        Self::with_storage(
             uuid::Uuid::now_v7().to_string(),
             production_repository(),
             Arc::new(UuidIds),
+            storage,
         )
+    }
+
+    pub(crate) fn production() -> Self {
+        Self::try_production().expect("production daemon session initialization")
     }
 
     pub fn stream_id(&self) -> String {
@@ -227,7 +296,21 @@ impl DaemonSession {
         state.active.remove(request.request_id());
         state.in_flight.remove(key);
         let response = match result {
-            Ok(project) => self.complete_success(request, &mut state, &project),
+            Ok(project) => {
+                if let Some(repo_mutex) = &self.state_repository {
+                    match repo_mutex.lock() {
+                        Ok(mut repo) => match repo.save_project(&project) {
+                            Ok(()) => self.complete_success(request, &mut state, &project),
+                            Err(storage_err) => {
+                                self.complete_failure(request, &mut state, &storage_err)
+                            }
+                        },
+                        Err(_) => internal_error(request.request_id()),
+                    }
+                } else {
+                    self.complete_success(request, &mut state, &project)
+                }
+            }
             Err(ApplicationError::Cancelled) => self.complete_cancellation(request, &mut state),
             Err(error) => self.complete_failure(request, &mut state, &error),
         };

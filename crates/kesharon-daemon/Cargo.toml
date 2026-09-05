@@ -11,6 +11,7 @@ kesharon-application = { path = "../kesharon-application" }
 kesharon-domain.workspace = true
 kesharon-ipc = { path = "../kesharon-ipc" }
 kesharon-protocol.workspace = true
+rusqlite = { version = "0.33", features = ["bundled"] }
 uuid.workspace = true
 
 [lints]

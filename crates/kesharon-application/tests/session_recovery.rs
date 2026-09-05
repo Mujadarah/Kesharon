@@ -1,13 +1,14 @@
 use kesharon_application::{
     ApplicationError, CredentialVault, RecoveredSession, SessionRecovery, StateRepository,
 };
-use kesharon_domain::{Project, ProjectId, Task, TaskCheckpoint};
+use kesharon_domain::{Project, ProjectId, ResourceBudget, Task, TaskCheckpoint, TaskId};
 use std::collections::HashMap;
 
 #[derive(Default)]
 struct InMemoryStateRepo {
     projects: HashMap<String, Project>,
     tasks: HashMap<String, Task>,
+    active_tasks: HashMap<String, Task>,
     checkpoints: HashMap<String, Vec<TaskCheckpoint>>,
     idempotency: HashMap<String, String>,
     last_active_project_id: Option<String>,
@@ -40,6 +41,10 @@ impl StateRepository for InMemoryStateRepo {
 
     fn load_task(&self, id: &str) -> Result<Option<Task>, ApplicationError> {
         Ok(self.tasks.get(id).cloned())
+    }
+
+    fn load_active_task(&self, project_id: &str) -> Result<Option<Task>, ApplicationError> {
+        Ok(self.active_tasks.get(project_id).cloned())
     }
 
     fn save_checkpoint(
@@ -95,7 +100,7 @@ impl CredentialVault for InMemoryVault {
 }
 
 #[test]
-fn session_recovery_restores_last_active_project() {
+fn session_recovery_restores_last_active_project_and_task() {
     let mut repo = InMemoryStateRepo::default();
 
     let project = Project::new(
@@ -107,12 +112,26 @@ fn session_recovery_restores_last_active_project() {
     .expect("valid project");
     repo.save_project(&project).expect("saved project");
 
+    let budget =
+        ResourceBudget::new(650 * 1024 * 1024, 128 * 1024 * 1024, 1).expect("valid budget");
+    let task = Task::new(
+        TaskId::new("task-active-1").expect("valid id"),
+        "Implement SQLite storage",
+        budget,
+    )
+    .expect("valid task");
+    repo.active_tasks.insert("proj-1".to_string(), task);
+
     let recovery = SessionRecovery::new(&repo);
     let recovered: RecoveredSession = recovery.execute().expect("recovery succeeds");
 
     assert_eq!(
         recovered.project().map(Project::display_name),
         Some("Kesharon")
+    );
+    assert_eq!(
+        recovered.active_task().map(Task::goal),
+        Some("Implement SQLite storage")
     );
 }
 

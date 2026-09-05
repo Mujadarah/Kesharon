@@ -17,7 +17,7 @@ pub enum TaskState {
 }
 
 impl TaskState {
-    const fn is_terminal(self) -> bool {
+    pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
     }
 }
@@ -157,6 +157,10 @@ impl Task {
 
     pub const fn state(&self) -> TaskState {
         self.state
+    }
+
+    pub const fn is_active(&self) -> bool {
+        !self.state.is_terminal()
     }
 
     pub fn start_planning(&mut self) -> Result<(), TaskError> {
